@@ -1,16 +1,14 @@
 package MsOffice::Word::Surgeon;
-
 use 5.010;
-
 use Moose;
-
-
-use Archive::Zip    qw(AZ_OK);
+use Archive::Zip                          qw(AZ_OK);
 use Encode;
-use List::Util      qw(pairs);
-use List::MoreUtils qw(uniq);
+use List::Util                            qw(pairs);
+use List::MoreUtils                       qw(uniq);
 use XML::LibXML;
-use POSIX           qw(strftime);
+use POSIX                                 qw(strftime);
+use MsOffice::Word::Surgeon::Utils        qw(maybe_preserve_spaces);
+use MsOffice::Word::Surgeon::Replacement;
 use namespace::clean -except => 'meta';
 
 # constant integers to specify indentation modes -- see L<XML::LibXML>
@@ -66,12 +64,44 @@ my $run_regex = qr[
    </w:r>                            # closing tag for the run
   ]x;
 
+$run_regex = qr[
+   <w:r>                             # opening tag for the run
+   (?:<w:rPr>(.*?)</w:rPr>)?         # run properties -- capture in $1
+   (?:
+     <w:t(?:\ xml:space="preserve")?>  # opening tag for the text contents
+     (.*?)                             # text contents -- capture in $2
+     </w:t>                            # closing tag for text
+   )?
+   </w:r>                            # closing tag for the run
+  ]x;
+
+
+
 
 
 # regexes for unlinking MsWord fields
 my $field_instruction_txt_rx = qr[<w:instrText.*?</w:instrText>];
 my $field_boundary_rx        = qr[<w:fldChar.*?/>]; #  "begin" / "separate" / "end"
 my $simple_field_rx          = qr[</?w:fldSimple[^>]*>];
+my $empty_run_rx             = qr[<w:r>(?:<w:rPr>.*?</w:rPr>)?</w:r>];
+
+#======================================================================
+# BUILDING
+#======================================================================
+
+
+# syntactic sugar for ->new($path) instead of ->new(filename => $path)
+around BUILDARGS => sub {
+  my $orig  = shift;
+  my $class = shift;
+
+  if ( @_ == 1 && !ref $_[0] ) {
+    return $class->$orig(filename => $_[0]);
+  }
+  else {
+    return $class->$orig(@_);
+  }
+};
 
 
 
@@ -97,24 +127,6 @@ sub original_contents { # can also be called later, not only as lazy constructor
   my $contents = decode_utf8($bytes);
   return $contents;
 }
-
-#======================================================================
-# INTERNAL UTILITIES
-#======================================================================
-
-sub next_rev_id {
-  my $self = shift;
-
-  return ++$self->{last_rev_id}; # TO CHECK : any more orthodox way to do that in Moose ?
-}
-
-
-sub attr_for_preserving_space {
-  my ($self, $txt) = @_;
-  return $txt =~ /^\s/ || $txt =~ /\s$/ ? ' xml:space="preserve"' : '';
-}
-
-
 
 
 #======================================================================
@@ -192,7 +204,7 @@ sub merge_runs {
       if ($last_t_contents) {
         # emit previous run
         my $props             = $last_props ? "<w:rPr>$last_props</w:rPr>" : ""; 
-        my $space_attr        = $self->attr_for_preserving_space($last_t_contents);
+        my $space_attr        = maybe_preserve_spaces($last_t_contents);
         push @new_fragments, "<w:r>$props<w:t$space_attr>$last_t_contents</w:t></w:r>";
       }
 
@@ -216,40 +228,10 @@ sub unlink_fields {
   # Note : fields can be nested, so their internal structure is quite complex
   # ... but after various unsuccessful attempts with grammars I finally found a
   # much easier solution
-  $self->reduce_noise($field_instruction_txt_rx, $field_boundary_rx, $simple_field_rx);
+  $self->reduce_noise($field_instruction_txt_rx, $field_boundary_rx,
+                      $simple_field_rx); ###, $empty_run_rx);
 }
 
-
-
-
-sub xml_for_revision {
-  my ($self, $old, $replacement) = @_;
-
-  my $auth = $self->author;
-  my $date = $self->date;
-  my $id1  = $self->next_rev_id;
-  my $id2  = $self->next_rev_id;
-
-  # $replacement is either a string or a callback to generate the string
-  my $new = ref $replacement ? $replacement->($old) : $replacement;
-
-  # special attrs for preserving spaces
-  my $space_old = $self->attr_for_preserving_space($old);
-  my $space_new = $self->attr_for_preserving_space($new);
-
-  my $xml = qq{</w:t></w:r>}
-          . qq{<w:del w:id="$id1" w:author="$auth" w:date="$date">}
-          . qq{<w:r><w:delText$space_old>$old</w:delText></w:r>}
-          . qq{</w:del>}
-          . qq{<w:ins w:id="$id2" w:author="$auth" w:date="$date">}
-          . qq{<w:r><w:t$space_new>$new</w:t></w:r>}
-          . qq{</w:ins>}
-          . qq{<w:r><w:t xml:space="preserve">} # not always needed, but how can we know ?
-                                                # this depends on the contents of next run
-          ;
-
-  return $xml;
-}
 
 
 sub apply_replacements {
@@ -262,11 +244,22 @@ sub apply_replacements {
 
   # build a substitution callback
   my %replacement = map {@$_} @replacements;
-  my $replace_it   = sub {my $orig = shift; $replacement{$orig}};
+  my $replace_it   = sub {
+    my $orig  = shift;
+    my $repl = $replacement{$orig};
+    my $auth = $repl =~ /^\p{Lu}___/ ? $repl : __PACKAGE__;  # todo : better default
+    my $replacer = MsOffice::Word::Surgeon::Replacement->new(
+      original    => $orig,
+      replacement => $repl,
+      author      => $auth,
+     );
+    return $replacer->as_xml;
+  };
+
 
   # global substitution, inserting revision marks for each pattern found
   my $contents  = $self->contents;
-  $contents =~ s/($all_patterns)/$self->xml_for_revision($1,$replace_it)/eg;
+  $contents =~ s/($all_patterns)/$replace_it->($1)/eg;
 
   # inject as new contents
   $self->contents($contents);
