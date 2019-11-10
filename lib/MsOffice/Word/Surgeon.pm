@@ -1,3 +1,17 @@
+=begin TODO
+
+  - fix merge_runs -- new run structure
+  - new subclass "Replacements" - takes 
+      $surgeon->replacements(pairs => .., author => ..., date => ...)->apply;
+
+
+=cut
+
+
+
+
+
+
 package MsOffice::Word::Surgeon;
 use 5.010;
 use Moose;
@@ -24,15 +38,13 @@ has 'filename'    => (is => 'ro', isa => 'Str', required => 1);
 has 'zip'         => (is => 'ro',   isa => 'Archive::Zip',
                       builder => '_zip',   lazy => 1);
 
-has 'contents'    => (is => 'rw',   isa => 'Str',
-                      builder => 'original_contents', lazy => 1);
+has 'contents'    => (is => 'rw',   isa => 'Str', init_arg => undef,
+                      builder => 'original_contents', lazy => 1,
+                      trigger => sub {shift->clear_runs},
+                     );
 
-has 'last_rev_id' => (is => 'ro',   isa => 'Num', default => 0);
-
-# infos to be used in revision marks
-has 'author'      => (is => 'ro',   isa => 'Str', default => 'Surgeon');
-has 'date'        => (is => 'ro',   isa => 'Str',
-                      default => sub {strftime "%Y-%m-%dT%H:%M:%SZ", localtime});
+has 'runs'        => (is => 'ro',   isa => 'ArrayRef', init_arg => undef,
+                      builder => '_runs', lazy => 1, clearer => 'clear_runs');
 
 
 
@@ -53,37 +65,11 @@ my %noise_reduction_regexes = (
 my @noise_reduction_list = qw/proof_checking  revision_ids complex_script_bold
                               page_breaks language empty_para_props/;
 
-# Regex to split the whole contents into OOXML "runs" - and fragments inbetween
-# See $self->merge_runs()
-my $run_regex = qr[
-   <w:r>                             # opening tag for the run
-   (?:<w:rPr>(.*?)</w:rPr>)?         # run properties -- capture in $1
-   <w:t(?:\ xml:space="preserve")?>  # opening tag for the text contents
-   (.*?)                             # text contents -- capture in $2
-   </w:t>                            # closing tag for text
-   </w:r>                            # closing tag for the run
-  ]x;
-
-$run_regex = qr[
-   <w:r>                             # opening tag for the run
-   (?:<w:rPr>(.*?)</w:rPr>)?         # run properties -- capture in $1
-   (?:
-     <w:t(?:\ xml:space="preserve")?>  # opening tag for the text contents
-     (.*?)                             # text contents -- capture in $2
-     </w:t>                            # closing tag for text
-   )?
-   </w:r>                            # closing tag for the run
-  ]x;
-
-
-
-
 
 # regexes for unlinking MsWord fields
 my $field_instruction_txt_rx = qr[<w:instrText.*?</w:instrText>];
 my $field_boundary_rx        = qr[<w:fldChar.*?/>]; #  "begin" / "separate" / "end"
 my $simple_field_rx          = qr[</?w:fldSimple[^>]*>];
-my $empty_run_rx             = qr[<w:r>(?:<w:rPr>.*?</w:rPr>)?</w:r>];
 
 #======================================================================
 # BUILDING
@@ -127,6 +113,43 @@ sub original_contents { # can also be called later, not only as lazy constructor
   my $contents = decode_utf8($bytes);
   return $contents;
 }
+
+
+sub _runs {
+  my $self = shift;
+
+  state $run_regex = qr[
+   <w:r>                             # opening tag for the run
+   (?:<w:rPr>(.*?)</w:rPr>)?         # run properties -- capture in $1
+   (.*?)                             # run contents -- capture in $2
+   </w:r>                            # closing tag for the run
+  ]x;
+
+  state $txt_regex = qr[
+     <w:t(?:\ xml:space="preserve")?>  # opening tag for the text contents
+     (.*?)                             # text contents -- capture in $1
+     </w:t>                            # closing tag for text
+  ]x;
+
+
+  my $contents  = $self->contents;
+  my @run_fragments = split m[$run_regex], $contents, -1;
+  my @runs;
+
+  while (my ($before_run, $props, $run_contents) = splice @run_fragments, 0, 3) {
+    no warnings 'uninitialized';
+
+    my %run = (before => $before_run // '', props => $props // '', contents => []);
+    my @txt_fragments = split m[$txt_regex], $run_contents, -1;
+    while (my ($bt, $txt_contents) = splice @txt_fragments, 0, 2) {
+      push @{$run{contents}}, {before => $bt, contents => $txt_contents};
+    }
+    push @runs, \%run;
+  }
+
+  return \@runs;
+}
+
 
 
 #======================================================================
@@ -183,37 +206,50 @@ sub reduce_all_noises {
 sub merge_runs {
   my $self = shift;
 
-  # split the whole contents on run boundaries
-  my $contents  = $self->contents;
-  my @fragments = split m[$run_regex], $contents, -1;
 
   # variables to iterate on fragments and reconstruct the contents
   my @new_fragments;
-  my $last_props;
-  my $last_t_contents;
+  my $last_props      = "";
+  my $last_t_contents = [];
 
-  # loop on triplets in @fragments
-  while (my ($before_run, $run_props, $t_contents) = splice @fragments, 0, 3) {
-    no warnings 'uninitialized'; # because some @fragments may be undef
+  my $runs = $self->runs;
 
-    if (!$before_run && $run_props eq $last_props) {
-      # merge this run contents with the previous run
-      $last_t_contents .= $t_contents;
+  # loop on runs
+  foreach my $run (@$runs) {
+    no warnings 'uninitialized';
+
+    if (!$run->{before} && $run->{props} eq $last_props) {
+      foreach my $rc (@{$run->{contents}}) {
+        if (@$last_t_contents && !$rc->{before}) {
+          $last_t_contents->[-1]{contents} .= $rc->{contents}
+        }
+        else {
+          push @$last_t_contents, $rc;
+        }
+      }
     }
     else {
-      if ($last_t_contents) {
+      if (@$last_t_contents) {
         # emit previous run
         my $props             = $last_props ? "<w:rPr>$last_props</w:rPr>" : ""; 
-        my $space_attr        = maybe_preserve_spaces($last_t_contents);
-        push @new_fragments, "<w:r>$props<w:t$space_attr>$last_t_contents</w:t></w:r>";
+
+        my $run_contents = "";
+        foreach my $t (@$last_t_contents) {
+          $run_contents .= $t->{before} if $t->{before};
+          if ($t->{contents}) {
+            my $space_attr  = maybe_preserve_spaces($t->{contents});
+            $run_contents .= "<w:t$space_attr>$t->{contents}</w:t>";
+          }
+        }
+        push @new_fragments, "<w:r>$props$run_contents</w:r>";
       }
 
       # emit contents preceding the current run
-      push @new_fragments, $before_run if $before_run;
+      push @new_fragments, $run->{before} if $run->{before};
 
       # current run becomes "previous run"
-      $last_props      = $run_props;
-      $last_t_contents = $t_contents;
+      $last_props      = $run->{props};
+      $last_t_contents = $run->{contents}; # THIS IS AN ARRAYREF
     }
   }
 
@@ -222,14 +258,16 @@ sub merge_runs {
 }
 
 
+
+
+
 sub unlink_fields {
   my $self = shift;
 
   # Note : fields can be nested, so their internal structure is quite complex
   # ... but after various unsuccessful attempts with grammars I finally found a
   # much easier solution
-  $self->reduce_noise($field_instruction_txt_rx, $field_boundary_rx,
-                      $simple_field_rx); ###, $empty_run_rx);
+  $self->reduce_noise($field_instruction_txt_rx, $field_boundary_rx, $simple_field_rx);
 }
 
 
