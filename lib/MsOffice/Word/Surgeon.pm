@@ -1,17 +1,3 @@
-=begin TODO
-
-  - fix merge_runs -- new run structure
-  - new subclass "Replacements" - takes 
-      $surgeon->replacements(pairs => .., author => ..., date => ...)->apply;
-
-
-=cut
-
-
-
-
-
-
 package MsOffice::Word::Surgeon;
 use 5.010;
 use Moose;
@@ -245,39 +231,6 @@ sub unlink_fields {
 
 
 
-sub apply_replacements {
-  my ($self, @replacements) = @_; # list of pairs [$old => $new] -- order will be preserved
-
-  # build a regex of all $old texts to replace
-  my @patterns = map {$_->[0]} @replacements;
-  $_ =~ s/(\p{Pattern_Syntax})/\\$1/g foreach @patterns;  # escape regex chars
-  my $all_patterns = join "|", @patterns;
-
-  # build a substitution callback
-  my %replacement = map {@$_} @replacements;
-  my $replace_it   = sub {
-    my $orig  = shift;
-    my $repl = $replacement{$orig};
-    my $auth = $repl =~ /^\p{Lu}___/ ? $repl : __PACKAGE__;  # todo : better default
-    my $replacer = MsOffice::Word::Surgeon::Replacement->new(
-      original    => $orig,
-      replacement => $repl,
-      author      => $auth,
-     );
-    return $replacer->as_xml;
-  };
-
-
-  # global substitution, inserting revision marks for each pattern found
-  my $contents  = $self->contents;
-  $contents =~ s/($all_patterns)/$replace_it->($1)/eg;
-
-  # inject as new contents
-  $self->contents($contents);
-}
-
-
-
 #======================================================================
 # DELEGATION TO SUBCLASSES
 #======================================================================
@@ -326,14 +279,9 @@ sub save_as {
 sub replace {
   my ($self, $pattern, $replacement, @context) = @_;
 
-  my $xml = "";
-
-  foreach my $run (@{$self->runs}) {
-    $run->replace($pattern, $replacement, @context);
-    $xml .= $run->as_xml;
-  }
-
-  $self->contents($xml);
+  my $xml = join "", map {$_->replace($pattern, $replacement, @context)}
+                         @{$self->runs};
+  return $xml;
 }
 
 
@@ -346,12 +294,47 @@ sub replace {
 
 __END__
 
+
+
+sub apply_replacements {
+  my ($self, @replacements) = @_; # list of pairs [$old => $new] -- order will be preserved
+
+  # build a regex of all $old texts to replace
+  my @patterns = map {$_->[0]} @replacements;
+  $_ =~ s/(\p{Pattern_Syntax})/\\$1/g foreach @patterns;  # escape regex chars
+  my $all_patterns = join "|", @patterns;
+
+  # build a substitution callback
+  my %replacement = map {@$_} @replacements;
+  my $replace_it   = sub {
+    my $orig  = shift;
+    my $repl = $replacement{$orig};
+    my $auth = $repl =~ /^\p{Lu}___/ ? $repl : __PACKAGE__;  # todo : better default
+    my $replacer = MsOffice::Word::Surgeon::Replacement->new(
+      original    => $orig,
+      replacement => $repl,
+      author      => $auth,
+     );
+    return $replacer->as_xml;
+  };
+
+
+  # global substitution, inserting revision marks for each pattern found
+  my $contents  = $self->contents;
+  $contents =~ s/($all_patterns)/$replace_it->($1)/eg;
+
+  # inject as new contents
+  $self->contents($contents);
+}
+
+
+
+
+
+
 TODO
   - doc
   - tests
-  - Surgeon->new($filename) -- find a way in Moose
-
-
 
 
 =head1 SEE ALSO

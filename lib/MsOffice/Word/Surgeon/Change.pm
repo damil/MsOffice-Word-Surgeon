@@ -20,6 +20,9 @@ has 'date'        => (is => 'ro', isa => 'Date_ISO', default =>
                         sub {strftime "%Y-%m-%dT%H:%M:%SZ", localtime});
 has 'run'         => (is => 'ro', isa => 'MsOffice::Word::Surgeon::Run');
 
+has 'xml_before_txt' => (is => 'ro', isa => 'Str', required => 1);
+
+
 
 sub as_xml {
   my ($self) = @_;
@@ -39,21 +42,16 @@ sub as_xml {
   my $space_old = maybe_preserve_spaces($old);
   my $space_new = maybe_preserve_spaces($new);
 
-  my $xml = qq{</w:t></w:r>}
-          . qq{<w:del w:id="$rev_id" w:author="$author" w:date="$date">}
+  my $xml = qq{<w:del w:id="$rev_id" w:author="$author" w:date="$date">}
           . qq{<w:r>$props<w:delText$space_old>$old</w:delText></w:r>}
           . qq{</w:del>};
 
   if ($new) {
     $xml .= qq{<w:ins w:id="$rev_id" w:author="$author" w:date="$date">}
-          . qq{<w:r>$props<w:t$space_new>$new</w:t></w:r>}
+          . qq{<w:r>$props} . $self->xml_before_txt . qq{<w:t$space_new>$new</w:t></w:r>}
           . qq{</w:ins>};
   }
 
-  $xml .= qq{<w:r>$props<w:t xml:space="preserve">};
-  # NOTE : the last attribute xml:space="preserve" is not necessarily
-  # needed, but we can't know because at this stage there is no
-  # information about the content of the next run
 
   return $xml;
 }

@@ -56,8 +56,11 @@ sub merge {
 sub replace {
   my ($self, $pattern, $replacement, @context) = @_;
 
-  $_->replace($pattern, $replacement, run => $self, @context)
-    foreach @{$self->inner_texts};
+  my $xml = $self->xml_before;
+  $xml   .= join "", map {$_->replace($pattern, $replacement, run => $self, @context)}
+                         @{$self->inner_texts};
+
+  return $xml;
 }
 
 
