@@ -22,9 +22,10 @@ use List::MoreUtils                       qw(uniq);
 use XML::LibXML;
 use POSIX                                 qw(strftime);
 use MsOffice::Word::Surgeon::Utils        qw(maybe_preserve_spaces);
-use MsOffice::Word::Surgeon::Replacement;
+#use MsOffice::Word::Surgeon::Replacement;
 use MsOffice::Word::Surgeon::Run;
 use MsOffice::Word::Surgeon::Text;
+use MsOffice::Word::Surgeon::Change;
 use namespace::clean -except => 'meta';
 
 # constant integers to specify indentation modes -- see L<XML::LibXML>
@@ -233,62 +234,6 @@ sub merge_runs {
 
 
 
-
-#   # variables to iterate on fragments and reconstruct the contents
-#   my @new_fragments;
-#   my $last_props      = "";
-#   my @last_texts;
-
-#   my $runs = $self->runs;
-
-#   # loop on runs
-#   foreach my $run (@$runs) {
-#     no warnings 'uninitialized';
-
-#     if (!$run->xml_before && $run->props eq $last_props) {
-#       # merge contents of this run into the previous run
-#       foreach my $txt (@{$run->inner_texts) {
-#         if (@last_texts && !txt->xml_before) {
-#           $last_texts[-1]->add_literal_text($txt->literal_text);
-#         }
-#         else {
-#           push @last_texts, $txt;
-#         }
-#       }
-#     }
-#     else {
-#       if (@last_texts) {
-#         # emit previous run
-#         my $props             = $last_props ? "<w:rPr>$last_props</w:rPr>" : ""; 
-
-#         my $run_contents = "";
-#         foreach my $txt (@last_texts) {
-#           $run_contents .= $txt->xml_before;
-#           if (my $lit_txt = $txt->literal_text) {
-#             my $space_attr  = maybe_preserve_spaces($lit_txt);
-#             $run_contents .= "<w:t$space_attr>$lit_txt</w:t>";
-#           }
-#         }
-#         push @new_fragments, "<w:r>$props$run_contents</w:r>";
-#       }
-
-#       # emit contents preceding the current run
-#       push @new_fragments, $run->xml_before;
-
-#       # current run becomes "the previous run"
-#       $last_props = $run->props;
-#       @last_texts = @{$run->inner_texts};
-#     }
-#   }
-
-#   # reassemble the whole stuff and inject it as new contents
-#   $self->contents(join "", @new_fragments);
-# }
-
-
-
-
-
 sub unlink_fields {
   my $self = shift;
 
@@ -333,6 +278,18 @@ sub apply_replacements {
 
 
 
+#======================================================================
+# DELEGATION TO SUBCLASSES
+#======================================================================
+
+sub change {
+  my $self = shift;
+
+  my $change = MsOffice::Word::Surgeon::Change->new(@_);
+  return $change->as_xml;
+}
+
+
 
 
 #======================================================================
@@ -363,6 +320,24 @@ sub save_as {
   $self->zip->writeToFileNamed($filename) == AZ_OK
     or die "error writing zip archive to $filename";
 }
+
+
+
+sub replace {
+  my ($self, $pattern, $replacement, @context) = @_;
+
+  my $xml = "";
+
+  foreach my $run (@{$self->runs}) {
+    $run->replace($pattern, $replacement, @context);
+    $xml .= $run->as_xml;
+  }
+
+  $self->contents($xml);
+}
+
+
+
 
 
 

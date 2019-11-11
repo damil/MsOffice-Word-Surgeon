@@ -53,6 +53,12 @@ sub merge {
 }
 
 
+sub replace {
+  my ($self, $pattern, $replacement, @context) = @_;
+
+  $_->replace($pattern, $replacement, run => $self, @context)
+    foreach @{$self->inner_texts};
+}
 
 
 

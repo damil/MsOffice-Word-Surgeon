@@ -26,6 +26,16 @@ sub as_xml {
 }
 
 
+sub replace {
+  my ($self, $pattern, $replacement, @context) = @_;
+
+  $self->{literal_text} =~ s[($pattern)]
+                            [$replacement->(matched=>$1, @context)]eg;
+
+}
+
+
+
 1;
 
 
