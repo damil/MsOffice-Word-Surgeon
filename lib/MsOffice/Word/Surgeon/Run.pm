@@ -5,9 +5,10 @@ use Carp qw(croak);
 
 use namespace::clean -except => 'meta';
 
-has 'xml_before'  => (is => 'ro', isa => 'Str'                                    , required => 1);
-has 'props'       => (is => 'ro', isa => 'Str'                                    , required => 1);
-has 'inner_texts' => (is => 'ro', isa => 'ArrayRef[MsOffice::Word::Surgeon::Text]', required => 1);
+has 'xml_before'  => (is => 'ro', isa => 'Str', required => 1);
+has 'props'       => (is => 'ro', isa => 'Str', required => 1);
+has 'inner_texts' => (is => 'ro', required => 1,
+                      isa => 'ArrayRef[MsOffice::Word::Surgeon::Text]');
 
 
 sub as_xml {
@@ -28,25 +29,24 @@ sub as_xml {
 sub merge {
   my ($self, $next_run) = @_;
 
+  # sanity checks
   $next_run->isa(__PACKAGE__)
     or croak "argument to merge() should be a " . __PACKAGE__;
-
   $self->props eq $next_run->props
     or croak sprintf "runs have different properties: '%s' <> '%s'",
                       $self->props, $next_run->props;
-
   !$next_run->xml_before
-    or croak "cannot merge -- next run contains xml before the run : " . $next_run->xml_before;
+    or croak "cannot merge -- next run contains xml before the run : "
+           . $next_run->xml_before;
 
-  # NOTE : sanity checks above are redundant with checks performed in Surgeon::merge_runs ..
-
-
-
+  # loop over all text nodes of the next run
   foreach my $txt (@{$next_run->inner_texts}) {
     if (@{$self->{inner_texts}} && !$txt->xml_before) {
+      # concatenate current literal text with the previous text node
       $self->{inner_texts}[-1]->add_literal_text($txt->literal_text);
     }
     else {
+      # cannot merge, just add to the list of inner text nodes
       push @{$self->{inner_texts}}, $txt;
     }
   }
@@ -54,11 +54,13 @@ sub merge {
 
 
 sub replace {
-  my ($self, $pattern, $replacement, @context) = @_;
+  my ($self, $pattern, $replacement, %args) = @_;
 
-  my $xml = $self->xml_before;
-  $xml   .= join "", map {$_->replace($pattern, $replacement, run => $self, @context)}
-                         @{$self->inner_texts};
+  my @inner_xmls 
+    = map {$_->replace($pattern, $replacement, run => $self, %args)}
+          @{$self->inner_texts};
+
+  my $xml = $self->xml_before . join "", @inner_xmls;
 
   return $xml;
 }

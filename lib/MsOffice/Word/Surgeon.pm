@@ -2,16 +2,12 @@ package MsOffice::Word::Surgeon;
 use 5.010;
 use Moose;
 use Archive::Zip                          qw(AZ_OK);
-use Encode;
-use List::Util                            qw(pairs);
-use List::MoreUtils                       qw(uniq);
+use Encode                                qw(encode_utf8 decode_utf8);
 use XML::LibXML;
-use POSIX                                 qw(strftime);
-use MsOffice::Word::Surgeon::Utils        qw(maybe_preserve_spaces);
-#use MsOffice::Word::Surgeon::Replacement;
 use MsOffice::Word::Surgeon::Run;
 use MsOffice::Word::Surgeon::Text;
 use MsOffice::Word::Surgeon::Change;
+
 use namespace::clean -except => 'meta';
 
 # constant integers to specify indentation modes -- see L<XML::LibXML>
@@ -65,7 +61,7 @@ my $simple_field_rx          = qr[</?w:fldSimple[^>]*>];
 #======================================================================
 
 
-# syntactic sugar for ->new($path) instead of ->new(filename => $path)
+# syntactic sugar for supporting ->new($path) instead of ->new(filename => $path)
 around BUILDARGS => sub {
   my $orig  = shift;
   my $class = shift;
@@ -108,26 +104,26 @@ sub _runs {
   my $self = shift;
 
   state $run_regex = qr[
-   <w:r>                             # opening tag for the run
-   (?:<w:rPr>(.*?)</w:rPr>)?         # run properties -- capture in $1
-   (.*?)                             # run contents -- capture in $2
-   </w:r>                            # closing tag for the run
+    <w:r>                             # opening tag for the run
+    (?:<w:rPr>(.*?)</w:rPr>)?         # run properties -- capture in $1
+    (.*?)                             # run contents -- capture in $2
+    </w:r>                            # closing tag for the run
   ]x;
 
   state $txt_regex = qr[
-     <w:t(?:\ xml:space="preserve")?>  # opening tag for the text contents
-     (.*?)                             # text contents -- capture in $1
-     </w:t>                            # closing tag for text
+    <w:t(?:\ xml:space="preserve")?>  # opening tag for the text contents
+    (.*?)                             # text contents -- capture in $1
+    </w:t>                            # closing tag for text
   ]x;
 
 
-  my $contents  = $self->contents;
+  my $contents      = $self->contents;
   my @run_fragments = split m[$run_regex], $contents, -1;
   my @runs;
 
   while (my ($xml_before_run, $props, $run_contents) = splice @run_fragments, 0, 3) {
-    no warnings 'uninitialized';
 
+    $run_contents //= '';
 
     my @txt_fragments = split m[$txt_regex], $run_contents, -1;
     my @texts;
@@ -250,7 +246,7 @@ sub change {
 #======================================================================
 
 
-sub _update_zip {
+sub _update_contents_in_zip {
   my $self = shift;
 
   $self->zip->contents(MAIN_DOCUMENT, encode_utf8($self->contents));
@@ -260,7 +256,7 @@ sub _update_zip {
 sub overwrite {
   my $self = shift;
 
-  $self->_update_zip;
+  $self->_update_contents_in_zip;
   $self->zip->overwrite;
 }
 
@@ -269,7 +265,7 @@ sub overwrite {
 sub save_as {
   my ($self, $filename) = @_;
 
-  $self->_update_zip;
+  $self->_update_contents_in_zip;
   $self->zip->writeToFileNamed($filename) == AZ_OK
     or die "error writing zip archive to $filename";
 }
@@ -286,47 +282,9 @@ sub replace {
 
 
 
-
-
-
-
 1;
 
 __END__
-
-
-
-sub apply_replacements {
-  my ($self, @replacements) = @_; # list of pairs [$old => $new] -- order will be preserved
-
-  # build a regex of all $old texts to replace
-  my @patterns = map {$_->[0]} @replacements;
-  $_ =~ s/(\p{Pattern_Syntax})/\\$1/g foreach @patterns;  # escape regex chars
-  my $all_patterns = join "|", @patterns;
-
-  # build a substitution callback
-  my %replacement = map {@$_} @replacements;
-  my $replace_it   = sub {
-    my $orig  = shift;
-    my $repl = $replacement{$orig};
-    my $auth = $repl =~ /^\p{Lu}___/ ? $repl : __PACKAGE__;  # todo : better default
-    my $replacer = MsOffice::Word::Surgeon::Replacement->new(
-      original    => $orig,
-      replacement => $repl,
-      author      => $auth,
-     );
-    return $replacer->as_xml;
-  };
-
-
-  # global substitution, inserting revision marks for each pattern found
-  my $contents  = $self->contents;
-  $contents =~ s/($all_patterns)/$replace_it->($1)/eg;
-
-  # inject as new contents
-  $self->contents($contents);
-}
-
 
 
 

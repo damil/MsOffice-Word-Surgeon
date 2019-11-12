@@ -51,7 +51,7 @@ sub replace {
       $xml_before_txt = "";
     }
     if ($matched) {
-      $xml .= $replacement->(matched => $matched,
+      $xml .= $replacement->(matched        => $matched,
                              xml_before_txt => $xml_before_txt,
                              %args,
                             );
