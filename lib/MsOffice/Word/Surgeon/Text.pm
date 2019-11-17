@@ -2,6 +2,7 @@ package MsOffice::Word::Surgeon::Text;
 use feature 'state';
 use Moose;
 use MsOffice::Word::Surgeon::Utils qw(maybe_preserve_spaces);
+use Carp                           qw(croak);
 
 use namespace::clean -except => 'meta';
 
@@ -9,9 +10,15 @@ has 'xml_before'   => (is => 'ro', isa => 'Str', required => 1);
 has 'literal_text' => (is => 'ro', isa => 'Str', required => 1);
 
 
-sub add_literal_text {
-  my ($self, $more_text) = @_;
-  $self->{literal_text} .= $more_text;
+sub merge {
+  my ($self, $next_text) = @_;
+
+  !$next_text->xml_before
+    or croak "cannot merge -- next text contains xml before the text : "
+           . $next_text->xml_before;
+
+  $self->{literal_text} .= $next_text->literal_text;
+
 }
 
 

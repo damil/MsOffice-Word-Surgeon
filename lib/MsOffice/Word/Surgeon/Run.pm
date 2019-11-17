@@ -43,7 +43,7 @@ sub merge {
   foreach my $txt (@{$next_run->inner_texts}) {
     if (@{$self->{inner_texts}} && !$txt->xml_before) {
       # concatenate current literal text with the previous text node
-      $self->{inner_texts}[-1]->add_literal_text($txt->literal_text);
+      $self->{inner_texts}[-1]->merge($txt);
     }
     else {
       # cannot merge, just add to the list of inner text nodes
@@ -69,5 +69,72 @@ sub replace {
 
 1;
 
+__END__
+
+=encoding ISO-8859-1
+
+=head1 NAME
+
+MsOffice::Word::Surgeon::Run -- internal representation for a "run of text"
+
+=head1 DESCRIPTION
+
+This is used internally by L<MsOffice::Word::Surgeon> for storing
+a "run of text" in and MsWord document. It loosely corresponds to
+a C<< <w:r> >> node in OOXML, but may also contain an anonymous XML
+fragment which is the part of the document just before the C<< <w:r> >> 
+node -- used for reconstructing the complete document after having changed
+the contents of some runs.
+
+
+=head1 METHODS
+
+=head2 new
+
+  my $run = MsOffice::Word::Surgeon::Run(
+    xml_before  => $xml_string,
+    props       => $properties_string,
+    inner_texts => [MsOffice::Word::Surgeon::Text(...), ...],
+  );
+
+Constructor for a new run object. Arguments are :
+
+=over
+
+=item xml_before
+
+A string containing arbitrary XML preceding that run in the complete document.
+The string may be empty but must be present.
+
+=item props
+
+A string containing XML for the properties of this run (for example instructions
+for bold, italic, font, etc.). The module does not parse this information;
+it just compares the string for equality with the next run.
+
+
+=item inner_texts
+
+An array of L<MsOffice::Word::Surgeon::Text> objects, corresponding to the
+XML C<< <w:t> >> nodes inside the run.
+
+=back
+
+=head2 as_xml
+
+  my $xml = $run->as_xml;
+
+Returns the XML representation of that run.
+
+
+=head2 merge
+
+  $run->merge($next_run);
+
+Merge the contents of C<$next_run> together with the current run.
+This is only possible if both runs have the same properties (same
+string returned by the C<props> method), and if the next run has
+an empty C<xml_before> attribute; if the conditions are not met,
+an exception is raised.
 
 
