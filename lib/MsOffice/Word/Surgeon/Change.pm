@@ -13,14 +13,13 @@ subtype 'Date_ISO',
   message {"$_ is not a date in ISO format yyyy-mm-ddThh:mm:ss"};
 
 
-has 'matched'     => (is => 'ro', isa => 'Str', required => 1);
-has 'replacement' => (is => 'ro', isa => 'Str', required => 1);
+has 'to_delete'   => (is => 'ro', isa => 'Str');
+has 'to_insert'   => (is => 'ro', isa => 'Str');
 has 'author'      => (is => 'ro', isa => 'Str'               );
 has 'date'        => (is => 'ro', isa => 'Date_ISO', default =>
                         sub {strftime "%Y-%m-%dT%H:%M:%SZ", localtime});
 has 'run'         => (is => 'ro', isa => 'MsOffice::Word::Surgeon::Run');
-
-has 'xml_before_txt' => (is => 'ro', isa => 'Str', required => 1);
+has 'xml_before'  => (is => 'ro', isa => 'Str');
 
 
 
@@ -30,30 +29,51 @@ sub as_xml {
   state $rev_id = 0;
   $rev_id++;
 
-  my $date   = $self->date;
-  my $old    = $self->matched;
-  my $new    = $self->replacement;
-  my $author = $self->author;
-  my $props  = $self->run && $self->run->props
-                ? "<w:rPr>" . $self->run->props . "</w:rPr>"
-                : "";
+  my $date      = $self->date;
+  my $author    = $self->author;
+  my $props     = $self->run && $self->run->props
+                  ? "<w:rPr>" . $self->run->props . "</w:rPr>"
+                  : "";
+  my $xml = "";
 
-  # special attributes for preserving spaces
-  my $space_old = maybe_preserve_spaces($old);
-  my $space_new = maybe_preserve_spaces($new);
-
-  my $xml = qq{<w:del w:id="$rev_id" w:author="$author" w:date="$date">}
-          . qq{<w:r>$props<w:delText$space_old>$old</w:delText></w:r>}
+  if ($self->to_delete) {
+    my $space_attr = maybe_preserve_spaces($self->to_delete);
+    $xml .= qq{<w:del w:id="$rev_id" w:author="$author" w:date="$date">}
+            . qq{<w:r>$props}
+                 . qq{<w:delText$space_attr>}.$self->to_delete.qq{</w:delText>}
+            . qq{</w:r>}
           . qq{</w:del>};
-
-  if ($new) {
+  }
+  if ($self->to_insert) {
+    my $space_attr = maybe_preserve_spaces($self->to_insert);
     $xml .= qq{<w:ins w:id="$rev_id" w:author="$author" w:date="$date">}
-          . qq{<w:r>$props} . $self->xml_before_txt . qq{<w:t$space_new>$new</w:t></w:r>}
+            . qq{<w:r>$props}
+              . ($self->xml_before // '')
+              . qq{<w:t$space_attr>}.$self->to_insert.qq{</w:t>}
+            . qq{</w:r>}
           . qq{</w:ins>};
   }
-
 
   return $xml;
 }
 
 1;
+
+__END__
+
+=encoding ISO-8859-1
+
+=head1 NAME
+
+MsOffice::Word::Surgeon::Change -- generate XML markup for MsWord tracked changes
+
+=head1 DESCRIPTION
+
+This class implements the XML markup generation algorithm
+for the  L<MsOffice::Word::Surgeon/change> method.
+See that method for a description of the API.
+
+Each call generates a fresh revision id, inserted as C<w:id> attribute to the
+C<< <w:del> >> and C<< <w:ins> >> nodes -- but it doesn't seem to be used for
+any purpose by MsWord.
+

@@ -245,10 +245,12 @@ sub unlink_fields {
 
 
 sub replace {
-  my ($self, $pattern, $replacement, @context) = @_;
+  my ($self, $pattern, $replacement_callback, %replacement_args) = @_;
 
-  my $xml = join "", map {$_->replace($pattern, $replacement, @context)}
-                         @{$self->runs};
+  my $xml = join "", map {
+    $_->replace($pattern, $replacement_callback, %replacement_args)
+  }  @{$self->runs};
+
   return $xml;
 }
 
@@ -324,14 +326,18 @@ MsOffice::Word::Surgeon -- tamper wit the guts of Microsoft docx documents
   $surgeon->merge_runs;
 
   # anonymize
-  my %aliases = ('Claudio MONTEVERDI' => 'A_____', 'Heinrich SCHÜTZ' => 'B_____');
-  my $pattern = join "|", keys %aliases;
-  my $build_replacement = sub {
+  my %alias = ('Claudio MONTEVERDI' => 'A_____', 'Heinrich SCHÜTZ' => 'B_____');
+  my $pattern = join "|", keys %alias;
+  my $replacement_callback = sub {
     my %args =  @_;
-    my $repl = $aliases{$args{matched}};
-    return $surgeon->change(%args, replacement => $repl, author => __PACKAGE__);
+    return $surgeon->change(to_delete => $args{matched},
+                            to_insert => $alias{$args{matched}},
+                            author    => __PACKAGE__,
+                           );
   };
-  $surgeon->replace(qr[$pattern], $build_replacement);
+  $surgeon->replace(qr[$pattern], $replacement_callback);
+
+  # save the result
   $surgeon->overwrite; # or ->save_as($new_filename);
 
 
@@ -339,11 +345,11 @@ MsOffice::Word::Surgeon -- tamper wit the guts of Microsoft docx documents
 
 =head2 Purpose
 
-This module supports a few operations for modifying or extracting text from
-Microsoft Word documents in '.docx' format -- therefore the name
-'surgeon'. A surgeon does not give life, so if you want to create
-fresh documents, use one of the other packages listed in the
-L<SEE ALSO> section.
+This module supports a few operations for modifying or extracting text
+from Microsoft Word documents in '.docx' format -- therefore the name
+'surgeon'. Since a surgeon does not give life, there is no support for
+creating fresh documents; if you have such needs, use one of the other
+packages listed in the L<SEE ALSO> section.
 
 Some applications for this module are :
 
@@ -381,15 +387,22 @@ pretty-printing the internal XML structure
 
 =head2 Operating mode
 
-Internally, a document in C<.docx> format is a zipped archive. The
-main document contents is an XML file stored under member name
-C<word/document.xml>.  The full XML structure is quite complex (see
-OOXML spec), but the present module only focuses on E<text> nodes
-(those that contain literal text) and E<run> nodes (those that contain
-text formatting properties). All remaining XML information, for example
-for representing sections, paragraphs, tables, etc., is stored as opaque
-XML fragments; these fragments are re-inserted at proper places when
-reassembling the whole document after having modified some text nodes.
+The format of Microsoft C<.docx> documents is described in
+L<http://www.ecma-international.org/publications/standards/Ecma-376.htm>.
+and  L<http://officeopenxml.com/>. An excellent introduction can be
+found at L<https://www.toptal.com/xml/an-informal-introduction-to-docx>.
+Internally, a document is a zipped
+archive, where the member named C<word/document.xml> stores the main
+document contents, in XML format.
+
+The full XML structure is quite complex, but the present module does
+not need to parse all details because it only focuses on I<text> nodes
+(those that contain literal text) and I<run> nodes (those that contain
+text formatting properties). All remaining XML information, for
+example for representing sections, paragraphs, tables, etc., is stored
+as opaque XML fragments; these fragments are re-inserted at proper
+places when reassembling the whole document after having modified some
+text nodes.
 
 
 
@@ -409,15 +422,13 @@ Builds a new surgeon instance, bound to the given filename.
 
 =head3 contents()
 
-Accessor to the current internal XML representation of the document
-contents, returned as a Perl string.  The result of contents
-modification methods such as L<reduce_noise()> or L<replace()> will be
-reflected.
+Returns a Perl string containing the current internal XML representation of the document
+contents.
 
 =head3 original_contents()
 
 Returns a Perl string containing the XML representation of the
-document contents, as stored in the ZIP archive before any
+document contents, as it was in the ZIP archive before any
 modification.
 
 =head3 indented_contents()
@@ -451,7 +462,8 @@ restores the complete document.
 
 =head3 reduce_all_noises
 
-=head3 replace
+
+
 
 =head3 unlink_fields
 
@@ -460,36 +472,150 @@ restores the complete document.
 
 
 
+=head3 replace
 
+  my $xml = $surgeon->replace($pattern, $replacement_callback, %replacement_args);
+
+Replaces all occurrences of C<$pattern> regex within the document by
+a new string computed by C<$replacement_callback>, and returns a new xml
+string corresponding to the whole document contents after all these replacements.
+
+C<$pattern> should be a reference to a regular expression.
+
+The C<$replacement_callback> will be called for for each text node within
+each run node. It will receive a copy of C<< %replacement_args >>, enriched
+with three entries :
+
+=over
+
+=item matched
+
+The string that has been matched by C<$pattern>.
+
+=item run
+
+The run object in which this text resides.
+
+=item xml_before
+
+An optional XML fragment found before the matched text.
+
+=back
+
+The replacement callback should return an XML string.
+See the L</SYNOPSIS> for an example of a replacement callback.
+
+=head3 change
+
+  my $xml = $surgeon->change(
+    to_delete   => $text_to_delete,
+    to_insert   => $text_to_insert,
+    author      => $author_string,
+    date        => $date_string,
+    run         => $run_object,
+    xml_before  => $xml_string,
+  );
+
+This method generates markup for MsWord tracked changes. Users can
+then manually review those changes within MsWord and accept or reject
+them. This is best used in collaboration with the L</replace> method :
+the replacement callback can call C<< $self->change(...) >> to
+generate change tracking marks in the document.
+
+All parameters are optional, but either C<to_delete> or C<to_insert> (or both) must
+be present. The parameters are :
+
+=over
+
+=item to_delete
+
+The string of text to delete (usually this will be the C<matched> argument
+passed to the replacement callback).
+
+=item to_insert
+
+The string of new text to insert.
+
+=item author
+
+A short string that will be displayed by MsWord as the "author" of this tracked change.
+
+=item date
+
+A date (and optional time) in ISO format that will be displayed by
+MsWord as the date of this tracked change. The current date and time
+will be used by default.
+
+=item run
+
+A reference to the L<MsOffice::Word::Surgeon::Run> object surrounding
+this tracked change. The formatting properties of that run will be
+copied into the C<< <w:r> >> nodes of the deleted and inserted text fragments.
+
+
+=item xml_before
+
+An optional XML fragment to be inserted before the C<< <w:t> >> node
+of the inserted text
+
+=back
+
+This method delegates to the
+L<MsOffice::Word::Surgeon::Change> class for generating the
+XML markup.
 
 
 
 
 =head1 SEE ALSO
 
-Here are some packages in other languages that deal with C<docx> documents.
+The L<https://metacpan.org/pod/Document::OOXML> distribution on CPAN
+also manipulates C<docx> documents, but with another approach :
+internally it uses L<XML::LibXML> and XPath expressions for
+manipulating XML nodes. The API has some intersections with the
+present module, but there are also some differences : C<Document::OOXML>
+has more support for styling, while C<MsOffice::Word::Surgeon>
+has more flexible mechanisms for replacing
+text fragments.
+
+
+Other programming languages also have packages for dealing with C<docx> documents; here
+are some references :
 
 =over
 
-=item L<https://phpword.readthedocs.io/en/latest/>
+=item L<https://docs.microsoft.com/en-us/office/open-xml/word-processing>
+
+The C# Open XML SDK from Microsoft
+
+=item L<http://www.ericwhite.com/blog/open-xml-powertools-developer-center/>
+
+Additional functionalities built on top of the XML SDK.
 
 =item L<https://www.docx4java.org/trac/docx4j>
 
+An open source Java library.
+
+=item L<https://phpword.readthedocs.io/en/latest/>
+
+A PHP library dealing not only with Microsoft OOXML documents but also
+with OASIS and RTF formats.
+
 =item L<https://pypi.org/project/python-docx/>
 
-=item L<https://docs.microsoft.com/en-us/office/open-xml/word-processing>
-
-
+A Python library, documented at L<https://python-docx.readthedocs.io/en/latest/>.
 
 =back
 
-https://metacpan.org/pod/Document::OOXML::Document::Wordprocessor
+As far as I can tell, most of these libraries provide objects and methods that
+closely reflect the complete XML structure : for example there are classes for
+paragraphes, styles, fonts, inline shapes, etc.
 
-https://www.toptal.com/xml/an-informal-introduction-to-docx
+The present module is much simpler but also much more limited : it was optimised
+for dealing with the text contents and offers no support for presentation or
+paging features.
 
 
 =head1 TODO
 
-  - headers/footers
-  - docproperties
   - <w:caps w:val="true" /> ==> put in uppercase

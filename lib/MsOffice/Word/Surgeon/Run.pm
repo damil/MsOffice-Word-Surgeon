@@ -54,10 +54,12 @@ sub merge {
 
 
 sub replace {
-  my ($self, $pattern, $replacement, %args) = @_;
+  my ($self, $pattern, $replacement_callback, %replacement_args) = @_;
 
-  my @inner_xmls 
-    = map {$_->replace($pattern, $replacement, run => $self, %args)}
+  $replacement_args{run} = $self;
+
+  my @inner_xmls
+    = map {$_->replace($pattern, $replacement_callback, %replacement_args)}
           @{$self->inner_texts};
 
   my $xml = $self->xml_before . join "", @inner_xmls;
@@ -80,7 +82,7 @@ MsOffice::Word::Surgeon::Run -- internal representation for a "run of text"
 =head1 DESCRIPTION
 
 This is used internally by L<MsOffice::Word::Surgeon> for storing
-a "run of text" in and MsWord document. It loosely corresponds to
+a "run of text" in a MsWord document. It loosely corresponds to
 a C<< <w:r> >> node in OOXML, but may also contain an anonymous XML
 fragment which is the part of the document just before the C<< <w:r> >> 
 node -- used for reconstructing the complete document after having changed
@@ -136,5 +138,16 @@ This is only possible if both runs have the same properties (same
 string returned by the C<props> method), and if the next run has
 an empty C<xml_before> attribute; if the conditions are not met,
 an exception is raised.
+
+
+=head2 replace
+
+  my $xml = $run->replace($pattern, $replacement_callback, %replacement_args);
+
+Replaces all occurrences of C<$pattern> within all text nodes by
+a new string computed by C<$replacement_callback>, and returns a new xml
+string corresponding to the result of all these replacements. This is the
+internal implementation for public method
+L<MsOffice::Word::Surgeon/replace>.
 
 
