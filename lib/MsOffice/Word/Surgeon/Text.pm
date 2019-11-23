@@ -33,6 +33,14 @@ sub merge {
 
 }
 
+=begin TODO
+
+  - accept either callback or fixed string as replacement
+  - test if replacement is literal text or is XML
+
+=end TODO
+
+=cut
 
 
 sub replace {
@@ -41,7 +49,7 @@ sub replace {
   my @fragments = split qr[($pattern)], $self->{literal_text}, -1;
 
   my $xml = "";
-  my $is_first = 1;
+  my $is_first_fragment = 1;
 
   while (my ($txt_before, $matched) = splice (@fragments, 0, 2)) {
     my $xml_before = $is_first_fragment ? $self->xml_before : "";
@@ -70,6 +78,12 @@ sub replace {
   }
 
   return $xml;
+}
+
+
+sub uppercase {
+  my $self = shift;
+  $self->{literal_text} = uc($self->{literal_text});
 }
 
 
@@ -148,4 +162,7 @@ string corresponding to the result of all these replacements. This is the
 internal implementation for public method
 L<MsOffice::Word::Surgeon/replace>.
 
+=head2 uppercase
+
+Puts the literal text within the node into uppercase letters.
 

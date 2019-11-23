@@ -39,8 +39,14 @@ sub merge {
     or croak "cannot merge -- next run contains xml before the run : "
            . $next_run->xml_before;
 
+
   # loop over all text nodes of the next run
   foreach my $txt (@{$next_run->inner_texts}) {
+
+    $DB::single = 1
+      if $txt->literal_text eq 'MsWord';
+
+
     if (@{$self->{inner_texts}} && !$txt->xml_before) {
       # concatenate current literal text with the previous text node
       $self->{inner_texts}[-1]->merge($txt);
@@ -65,6 +71,15 @@ sub replace {
   my $xml = $self->xml_before . join "", @inner_xmls;
 
   return $xml;
+}
+
+
+sub remove_caps_property {
+  my $self = shift;
+
+  if ($self->{props} =~ s[<w:caps/>][]) {
+    $_->uppercase foreach @{$self->inner_texts};
+  }
 }
 
 
@@ -151,3 +166,8 @@ internal implementation for public method
 L<MsOffice::Word::Surgeon/replace>.
 
 
+=head2 remove_caps_property
+
+Searches in the run properties for a C<< <w:caps/> >> property;
+if found, removes it, and replaces all inner texts by their
+uppercase equivalents.

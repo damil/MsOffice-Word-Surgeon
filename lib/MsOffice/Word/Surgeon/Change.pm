@@ -2,7 +2,7 @@ package MsOffice::Word::Surgeon::Change;
 use feature 'state';
 use Moose;
 use Moose::Util::TypeConstraints;
-
+use Carp                           qw(croak);
 use POSIX                          qw(strftime);
 use MsOffice::Word::Surgeon::Utils qw(maybe_preserve_spaces);
 use namespace::clean -except => 'meta';
@@ -21,6 +21,13 @@ has 'date'        => (is => 'ro', isa => 'Date_ISO', default =>
 has 'run'         => (is => 'ro', isa => 'MsOffice::Word::Surgeon::Run');
 has 'xml_before'  => (is => 'ro', isa => 'Str');
 
+
+sub BUILD {
+  my $self = shift;
+
+  $self->to_delete || $self->to_insert
+    or croak "attempt to create a Change object without 'to_delete' nor 'to_insert' args";
+}
 
 
 sub as_xml {
@@ -70,8 +77,10 @@ MsOffice::Word::Surgeon::Change -- generate XML markup for MsWord tracked change
 =head1 DESCRIPTION
 
 This class implements the XML markup generation algorithm
-for the  L<MsOffice::Word::Surgeon/change> method.
+for the method L<MsOffice::Word::Surgeon/change> .
 See that method for a description of the API.
+
+=head1 INTERNALS
 
 Each call generates a fresh revision id, inserted as C<w:id> attribute to the
 C<< <w:del> >> and C<< <w:ins> >> nodes -- but it doesn't seem to be used for

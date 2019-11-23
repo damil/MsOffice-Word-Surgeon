@@ -1,5 +1,5 @@
 package MsOffice::Word::Surgeon;
-use 5.010;
+use 5.10.0;
 use Moose;
 use Archive::Zip                          qw(AZ_OK);
 use Encode                                qw(encode_utf8 decode_utf8);
@@ -10,6 +10,8 @@ use MsOffice::Word::Surgeon::Text;
 use MsOffice::Word::Surgeon::Change;
 
 use namespace::clean -except => 'meta';
+
+our $VERSION = '1.0';
 
 # constant integers to specify indentation modes -- see L<XML::LibXML>
 use constant XML_NO_INDENT     => 0;
@@ -40,12 +42,12 @@ has 'runs'      => (is => 'ro',   isa => 'ArrayRef', init_arg => undef,
 
 # Various regexes for removing XML information without interest
 my %noise_reduction_regexes = (
-  proof_checking             => qr(<w:(?:proofErr[^>]+|noProof/)>),
-  revision_ids               => qr(\sw:rsid\w+="[^"]+"),
-  complex_script_bold        => qr(<w:bCs/>),
-  page_breaks                => qr(<w:lastRenderedPageBreak/>),
-  language                   => qr(<w:lang w:val="[^"]+"/>),
-  empty_run_props            => qr(<w:rPr></w:rPr>),
+  proof_checking        => qr(<w:(?:proofErr[^>]+|noProof/)>),
+  revision_ids          => qr(\sw:rsid\w+="[^"]+"),
+  complex_script_bold   => qr(<w:bCs/>),
+  page_breaks           => qr(<w:lastRenderedPageBreak/>),
+  language              => qr(<w:lang w:val="[^/>]+/>),
+  empty_run_props       => qr(<w:rPr></w:rPr>),
  );
 
 my @noise_reduction_list     = qw/proof_checking  revision_ids complex_script_bold
@@ -117,19 +119,22 @@ sub _runs {
   my @run_fragments = split m[$run_regex], $contents, -1;
   my @runs;
 
+ RUN:
   while (my ($xml_before_run, $props, $run_contents) = splice @run_fragments, 0, 3) {
-
     $run_contents //= '';
 
     my @txt_fragments = split m[$txt_regex], $run_contents, -1;
     my @texts;
+  TXT:
     while (my ($bt, $txt_contents) = splice @txt_fragments, 0, 2) {
+      next TXT if !$bt && !$txt_contents;
       push @texts, MsOffice::Word::Surgeon::Text->new(
         xml_before   => $bt           // '',
         literal_text => $txt_contents // '',
        );
     }
 
+    next RUN if !$xml_before_run && !@texts;
     push @runs, MsOffice::Word::Surgeon::Run->new(
       xml_before  => $xml_before_run // '',
       props       => $props          // '',
@@ -204,11 +209,18 @@ sub reduce_all_noises {
 
 
 sub merge_runs {
-  my $self = shift;
-  my @new_runs;
+  my ($self, %args) = @_;
 
+  # check validity of received args
+  state $is_valid_arg = {no_caps => 1};
+  $is_valid_arg->{$_} or croak "merge_runs(): invalid arg: $_"
+    foreach keys %args;
+
+  my @new_runs;
   # loop over internal "run" objects
   foreach my $run (@{$self->runs}) {
+
+    $run->remove_caps_property if $args{no_caps};
 
     # check if the current run can be merged with the previous one
     if (   !$run->xml_before                    # no other XML markup between the 2 runs
@@ -388,62 +400,66 @@ pretty-printing the internal XML structure
 =head2 Operating mode
 
 The format of Microsoft C<.docx> documents is described in
-L<http://www.ecma-international.org/publications/standards/Ecma-376.htm>.
+L<http://www.ecma-international.org/publications/standards/Ecma-376.htm>
 and  L<http://officeopenxml.com/>. An excellent introduction can be
 found at L<https://www.toptal.com/xml/an-informal-introduction-to-docx>.
 Internally, a document is a zipped
 archive, where the member named C<word/document.xml> stores the main
 document contents, in XML format.
 
-The full XML structure is quite complex, but the present module does
-not need to parse all details because it only focuses on I<text> nodes
-(those that contain literal text) and I<run> nodes (those that contain
-text formatting properties). All remaining XML information, for
-example for representing sections, paragraphs, tables, etc., is stored
-as opaque XML fragments; these fragments are re-inserted at proper
-places when reassembling the whole document after having modified some
-text nodes.
+The present module does not parse all details of the whole XML
+structure because it only focuses on I<text> nodes (those that contain
+literal text) and I<run> nodes (those that contain text formatting
+properties). All remaining XML information, for example for
+representing sections, paragraphs, tables, etc., is stored as opaque
+XML fragments; these fragments are re-inserted at proper places when
+reassembling the whole document after having modified some text nodes.
 
+=head2 Status
+
+This is the first release; the software architecture is quite stable
+but the module is not battle-proofed. Minor changed to the public
+interface may occur in future versions.
 
 
 =head1 METHODS
 
 =head2 Constructor
 
-=head3 new()
+=head3 new
 
   my $surgeon = MsOffice::Word::Surgeon->new(docx => $filename);
   # or simply : ->new($filename);
 
-Builds a new surgeon instance, bound to the given filename.
+Builds a new surgeon instance, initialized with the contents of the given filename.
 
 
 =head2 Contents restitution
 
-=head3 contents()
+=head3 contents
 
-Returns a Perl string containing the current internal XML representation of the document
+Returns a Perl string with the current internal XML representation of the document
 contents.
 
-=head3 original_contents()
+=head3 original_contents
 
-Returns a Perl string containing the XML representation of the
+Returns a Perl string with the XML representation of the
 document contents, as it was in the ZIP archive before any
 modification.
 
-=head3 indented_contents()
+=head3 indented_contents
 
 Returns an indented version of the XML contents, suitable for inspection in a text editor.
 This is produced by L<XML::LibXML::Document/toString> and therefore is returned as an encoded
 byte string, not a Perl string.
 
-=head3 plain_text()
+=head3 plain_text
 
 Returns the text contents of the document, without any markup.
 Paragraphs are converted to newlines, all other formatting instructions are ignored.
 
 
-=head3 runs()
+=head3 runs
 
 Returns a list of L<MsOffice::Word::Surgeon::Run> objects. Each of
 these objects holds an XML fragment; joining all fragments
@@ -456,20 +472,58 @@ restores the complete document.
 
 =head3 reduce_noise
 
+  $surgeon->reduce_noise($regex1, $regex2, ...);
+
+This method is used for removing unnecessary information in the XML
+markup.  It applies the given list of regexes to the whole document,
+suppressing matches.  The final result is put back into C<<
+$self->contents >>. Regexes may be given either as C<< qr/.../ >>
+references, or as names of builtin regexes (described below).  Regexes
+are applied to the whole XML contents, not only to run nodes.
+
+
 =head3 noise_reduction_regex
 
+  my $regex = $surgeon->noise_reduction_regex($regex_name);
 
+Returns the builtin regex corresponding to the given name.
+Known regexes are :
+
+  proof_checking       => qr(<w:(?:proofErr[^>]+|noProof/)>),
+  revision_ids         => qr(\sw:rsid\w+="[^"]+"),
+  complex_script_bold  => qr(<w:bCs/>),
+  page_breaks          => qr(<w:lastRenderedPageBreak/>),
+  language             => qr(<w:lang w:val="[^/>]+/>),
+  empty_run_props      => qr(<w:rPr></w:rPr>),
 
 =head3 reduce_all_noises
 
+  $surgeon->reduce_all_noises;
 
-
+Applies all regexes from the previous method.
 
 =head3 unlink_fields
 
+Removes all fields from the document, just leaving the current
+value stored in each field. This is the equivalent of performing Ctrl-Shift-F9
+on the whole document.
 
 =head3 merge_runs
 
+  $surgeon->merge_runs(no_caps => 1); # optional arg
+
+Walks through all runs of text within the document, trying to merge
+adjacent runs when possible (i.e. when both runs have the same
+properties, and there is no other XML node inbetween).
+
+This operation is a prerequisite before performing replace operations, because
+documents edited in MsWord often have run boundaries across sentences or
+even in the middle of words; so regex searches can only be successful if those
+artificial boundaries have been removed.
+
+If the argument C<< no_caps => 1 >> is present, the merge operation
+will also convert runs with the C<w:caps> property, putting all letters
+into uppercase and removing the property; this makes more merges possible.
 
 
 =head3 replace
@@ -520,7 +574,7 @@ This method generates markup for MsWord tracked changes. Users can
 then manually review those changes within MsWord and accept or reject
 them. This is best used in collaboration with the L</replace> method :
 the replacement callback can call C<< $self->change(...) >> to
-generate change tracking marks in the document.
+generate tracked change marks in the document.
 
 All parameters are optional, but either C<to_delete> or C<to_insert> (or both) must
 be present. The parameters are :
@@ -608,14 +662,20 @@ A Python library, documented at L<https://python-docx.readthedocs.io/en/latest/>
 =back
 
 As far as I can tell, most of these libraries provide objects and methods that
-closely reflect the complete XML structure : for example there are classes for
+closely reflect the complete XML structure : for example they have classes for
 paragraphes, styles, fonts, inline shapes, etc.
 
 The present module is much simpler but also much more limited : it was optimised
 for dealing with the text contents and offers no support for presentation or
 paging features.
 
+=head1 AUTHOR
 
-=head1 TODO
+Laurent Dami, E<lt>dami AT cpan DOT org<gt>
 
-  - <w:caps w:val="true" /> ==> put in uppercase
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2019 by Laurent Dami.
+
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself.
