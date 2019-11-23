@@ -2,7 +2,7 @@ package MsOffice::Word::Surgeon::Utils;
 
 use Exporter  qw/import/;
 
-our @EXPORT = qw/maybe_preserve_spaces/;
+our @EXPORT = qw/maybe_preserve_spaces is_at_run_level/;
 
 use base 'Exporter';
 
@@ -11,6 +11,13 @@ sub maybe_preserve_spaces {
   my ($txt) = @_;
   return $txt =~ /^\s/ || $txt =~ /\s$/ ? ' xml:space="preserve"' : '';
 }
+
+sub is_at_run_level {
+  my ($xml) = @_;
+  return $xml =~ /^<w:(?:r|del|ins)\b/;
+}
+
+
 
 1;
 
@@ -42,6 +49,13 @@ Returns the XML attribute to be inserted into C<< <w:t> >> nodes and
 C<< <w:delText> >> nodes when the literal text within the node starts
 or ends with a space -- in that case the XML should contain the 
 attribute C<<  xml:space="preserve" >>
+
+=head2 is_at_run_level
+
+   if (is_at_run_level($xml)) {...}
+
+Returns true if the given XML fragment starts with a C<< <w:run> >>, 
+C<< <w:del> >> or C<< <w:ins> >> node.
 
 
 

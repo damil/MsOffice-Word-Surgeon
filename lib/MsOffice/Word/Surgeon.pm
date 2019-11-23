@@ -158,8 +158,6 @@ sub indented_contents {
   return $dom->toString(XML_SIMPLE_INDENT); # returned as bytes sequence, not a Perl string
 }
 
-
-
 sub plain_text {
   my $self = shift;
 
@@ -175,7 +173,6 @@ sub plain_text {
   return $txt;
 }
 
-
 #======================================================================
 # MODIFYING CONTENTS
 #======================================================================
@@ -186,8 +183,6 @@ sub noise_reduction_regex {
     or croak "->noise_reduction_regex('$regex_name') : unknown regex name";
   return $regex;
 }
-
-
 
 sub reduce_noise {
   my ($self, @noises) = @_;
@@ -206,7 +201,6 @@ sub reduce_all_noises {
 
   $self->reduce_noise(@noise_reduction_list);
 }
-
 
 sub merge_runs {
   my ($self, %args) = @_;
@@ -240,8 +234,6 @@ sub merge_runs {
   $self->contents(join "", map {$_->as_xml} @new_runs);
 }
 
-
-
 sub unlink_fields {
   my $self = shift;
 
@@ -253,9 +245,6 @@ sub unlink_fields {
   $self->reduce_noise($field_instruction_txt_rx, $field_boundary_rx, $simple_field_rx);
 }
 
-
-
-
 sub replace {
   my ($self, $pattern, $replacement_callback, %replacement_args) = @_;
 
@@ -265,8 +254,6 @@ sub replace {
 
   return $xml;
 }
-
-
 
 #======================================================================
 # DELEGATION TO SUBCLASSES
@@ -280,8 +267,6 @@ sub change {
 }
 
 
-
-
 #======================================================================
 # SAVING THE FILE
 #======================================================================
@@ -293,15 +278,12 @@ sub _update_contents_in_zip {
   $self->zip->contents(MAIN_DOCUMENT, encode_utf8($self->contents));
 }
 
-
 sub overwrite {
   my $self = shift;
 
   $self->_update_contents_in_zip;
   $self->zip->overwrite;
 }
-
-
 
 sub save_as {
   my ($self, $docx) = @_;
@@ -310,10 +292,6 @@ sub save_as {
   $self->zip->writeToFileNamed($docx) == AZ_OK
     or die "error writing zip archive to $docx";
 }
-
-
-
-
 
 1;
 
@@ -528,16 +506,22 @@ into uppercase and removing the property; this makes more merges possible.
 
 =head3 replace
 
-  my $xml = $surgeon->replace($pattern, $replacement_callback, %replacement_args);
+  my $xml = $surgeon->replace($pattern, $replacement, %replacement_args);
 
-Replaces all occurrences of C<$pattern> regex within the document by
-a new string computed by C<$replacement_callback>, and returns a new xml
-string corresponding to the whole document contents after all these replacements.
+Replaces all occurrences of C<$pattern> regex within the text nodes by the
+given C<$replacement>, and returns new XML corresponding to the whole document
+contents after all these operations. This is not exactly like a search-replace
+operation performed within MsWord, because the search does not cross boundaries
+of text nodes; so it is highly recommended to call  L</merge_runs> before invoking
+C<replace()>, to maximize the chances of successful replacements.
 
-C<$pattern> should be a reference to a regular expression.
+The argument C<$pattern> can be either a string or a reference to a regular expression.
+It should not contain any capturing parentheses, because that would perturb text
+splitting operations.
 
-The C<$replacement_callback> will be called for for each text node within
-each run node. It will receive a copy of C<< %replacement_args >>, enriched
+The argument C<$replacement> can be either a fixed string, or a reference to
+a callback subroutine that will be called for each match.
+The subroutine will receive a copy of C<< %replacement_args >>, enriched
 with three entries :
 
 =over
@@ -552,12 +536,14 @@ The run object in which this text resides.
 
 =item xml_before
 
-An optional XML fragment found before the matched text.
+The XML fragment (possibly empty) found before the matched text .
 
 =back
 
-The replacement callback should return an XML string.
+The callback subroutine may return either plain text or structured XML.
 See the L</SYNOPSIS> for an example of a replacement callback.
+
+
 
 =head3 change
 
