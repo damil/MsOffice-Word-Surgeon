@@ -12,3 +12,5 @@ t/etc/MsOffice-Word-Surgeon.docx
 t/msoffice-word-surgeon.t
 xt/manifest.t
 xt/pod.t
+META.yml
+META.json
