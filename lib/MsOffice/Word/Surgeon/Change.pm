@@ -21,6 +21,7 @@ has 'date'        => (is => 'ro', isa => 'Date_ISO', default =>
 has 'run'         => (is => 'ro', isa => 'MsOffice::Word::Surgeon::Run');
 has 'xml_before'  => (is => 'ro', isa => 'Str');
 
+our $VERSION = '1.0';
 
 sub BUILD {
   my $self = shift;
@@ -72,7 +73,7 @@ __END__
 
 =head1 NAME
 
-MsOffice::Word::Surgeon::Change -- generate XML markup for MsWord tracked changes
+MsOffice::Word::Surgeon::Change - generate XML markup for MsWord tracked changes
 
 =head1 DESCRIPTION
 

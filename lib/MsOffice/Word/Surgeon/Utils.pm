@@ -1,11 +1,9 @@
 package MsOffice::Word::Surgeon::Utils;
 
 use Exporter  qw/import/;
-
 our @EXPORT = qw/maybe_preserve_spaces is_at_run_level/;
 
-use base 'Exporter';
-
+our $VERSION = '1.0';
 
 sub maybe_preserve_spaces {
   my ($txt) = @_;
@@ -14,7 +12,7 @@ sub maybe_preserve_spaces {
 
 sub is_at_run_level {
   my ($xml) = @_;
-  return $xml =~ /^<w:(?:r|del|ins)\b/;
+  return $xml =~ m[</w:(?:r|del|ins)>$];
 }
 
 
@@ -27,7 +25,7 @@ __END__
 
 =head1 NAME
 
-MsOffice::Word::Surgeon::Utils -- utility functions for MsOffice::Word::Surgeon
+MsOffice::Word::Surgeon::Utils - utility functions for MsOffice::Word::Surgeon
 
 =head1 SYNOPSIS
 
@@ -54,8 +52,8 @@ attribute C<<  xml:space="preserve" >>
 
    if (is_at_run_level($xml)) {...}
 
-Returns true if the given XML fragment starts with a C<< <w:run> >>, 
-C<< <w:del> >> or C<< <w:ins> >> node.
+Returns true if the given XML fragment ends with a C<< </w:run> >>,
+C<< </w:del> >> or C<< </w:ins> >> node.
 
 
 

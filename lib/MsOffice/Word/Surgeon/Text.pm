@@ -9,6 +9,9 @@ use namespace::clean -except => 'meta';
 has 'xml_before'   => (is => 'ro', isa => 'Str');
 has 'literal_text' => (is => 'ro', isa => 'Str', required => 1);
 
+our $VERSION = '1.0';
+
+
 sub as_xml {
   my $self = shift;
 
@@ -38,85 +41,90 @@ sub replace {
   my ($self, $pattern, $replacement, %args) = @_;
 
   my $xml = "";
-  my $text_node;
-
+  my $current_text_node;
   my $xml_before = $self->xml_before;
 
   # closure to make sure that $xml_before is used only once
-  my $maybe_xml_before = sub { my @r = $xml_before ? (xml_before => $xml_before) : ();
-                               $xml_before = undef;
-                               return @r;
-                             };
+  my $maybe_xml_before = sub {
+    my @r = $xml_before ? (xml_before => $xml_before) : ();
+    $xml_before = undef;
+    return @r;
+  };
 
   # closure to create a new text node
-  my $mk_new_text = sub {my ($literal_text) = @_;
-                         return MsOffice::Word::Surgeon::Text->new(
-                           $maybe_xml_before->(),
-                           literal_text => $literal_text,
-                          );
-                         };
-
+  my $mk_new_text = sub {
+    my ($literal_text) = @_;
+    return MsOffice::Word::Surgeon::Text->new(
+      $maybe_xml_before->(),
+      literal_text => $literal_text,
+     );
+  };
 
   # closure to create a new run node for enclosing a text node
-  my $add_new_run = sub { my ($text_node) = @_;
-                          my $run = MsOffice::Word::Surgeon::Run->new(
-                            xml_before  => '',
-                            props       => $args{run}->props,
-                            inner_texts => [$text_node],
-                           );
-                          $xml .= $run->as_xml;
-                        };
+  my $add_new_run = sub {
+    my ($text_node) = @_;
+    my $run = MsOffice::Word::Surgeon::Run->new(
+      xml_before  => '',
+      props       => $args{run}->props,
+      inner_texts => [$text_node],
+     );
+    $xml .= $run->as_xml;
+  };
 
+  # closure to add text to the current text node
+  my $add_to_current_text_node = sub {
+    my ($txt_to_add) = @_;
+    $current_text_node //= $mk_new_text->('');
+    $current_text_node->{literal_text} .= $txt_to_add;
+  };
 
-  my @fragments = split qr[($pattern)], $self->{literal_text}, -1;
+  # closure to clear the current text node
+  my $maybe_clear_current_text_node = sub {
+    if ($current_text_node) {
+      if (is_at_run_level($xml)) {
+        $add_new_run->($current_text_node);
+      }
+      else {
+        $xml .= $current_text_node->as_xml;
+      }
+      $current_text_node = undef;
+    }
+  };
 
+  # find pattern within $self, each match becomes a fragment to handle
+  my @fragments            = split qr[($pattern)], $self->{literal_text}, -1;
+  my $txt_after_last_match = pop @fragments;
+
+  # loop to handle each match
   while (my ($txt_before, $matched) = splice (@fragments, 0, 2)) {
-    if ($matched) {
-      # new text to replace the matched fragment
-      my $new_txt = !ref $replacement ? $replacement
-                                      :   # invoke the callback sub
-                                        $replacement->(matched => $matched,
-                                                       (!$txt_before ? $maybe_xml_before->() : ()),
-                                                       %args);
 
-      my $new_txt_is_xml = $new_txt =~ /^</;
-      if ($new_txt_is_xml) {
-        if ($txt_before) {
+    # new contents to replace the matched fragment
+    my $replacement_contents
+      = !ref $replacement ? $replacement
+                          : $replacement->(matched => $matched,
+                                           (!$txt_before ? $maybe_xml_before->() : ()),
+                                           %args);
 
-          # clear up $text_node, if any
-          if ($text_node) {
-            $xml .= $text_node->as_xml;
-            $text_node = undef;
-          }
-
-          $add_new_run->($mk_new_text->($txt_before));
-        }
-
-        # add the text or xml that replaces the match
-        $xml .= $new_txt;
-
+    my $replacement_is_xml = $replacement_contents =~ /^</;
+    if ($replacement_is_xml) {
+      # if there was text before the match, add it as a new run
+      if ($txt_before) {
+        $maybe_clear_current_text_node->();
+        $add_new_run->($mk_new_text->($txt_before));
       }
-      else { # new_text is literal text
-        $text_node //= $mk_new_text->('');
-        $text_node->{literal_text} .= ($txt_before // '') . $new_txt;
-      }
+
+      # add the xml that replaces the match
+      $xml .= $replacement_contents;
     }
-
-    else { # just $txt_before, no $matched -- so this is the last loop
-      $text_node //= $mk_new_text->('');
-      $text_node->{literal_text} .= $txt_before;
+    else { # $replacement_contents is not xml but just literal text
+      $add_to_current_text_node->(($txt_before // '') . $replacement_contents);
     }
   }
 
-
-  if ($text_node) {
-    if (is_at_run_level($xml)) {
-      $add_new_run->($text_node);
-    }
-    else {
-      $xml .= $text_node->as_xml;
-    }
-  }
+  # handle remaining contents after the last match
+  $add_to_current_text_node->($txt_after_last_match)
+    if $txt_after_last_match;
+  $maybe_clear_current_text_node->();
 
   return $xml;
 }
@@ -137,7 +145,7 @@ __END__
 
 =head1 NAME
 
-MsOffice::Word::Surgeon::Text -- internal representation for a node of literal text
+MsOffice::Word::Surgeon::Text - internal representation for a node of literal text
 
 =head1 DESCRIPTION
 

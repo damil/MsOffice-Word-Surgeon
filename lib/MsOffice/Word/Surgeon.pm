@@ -301,7 +301,7 @@ __END__
 
 =head1 NAME
 
-MsOffice::Word::Surgeon -- tamper wit the guts of Microsoft docx documents
+MsOffice::Word::Surgeon - tamper wit the guts of Microsoft docx documents
 
 =head1 SYNOPSIS
 

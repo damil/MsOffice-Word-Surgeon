@@ -11,6 +11,7 @@ has 'props'       => (is => 'ro', isa => 'Str', required => 1);
 has 'inner_texts' => (is => 'ro', required => 1,
                       isa => 'ArrayRef[MsOffice::Word::Surgeon::Text]');
 
+our $VERSION = '1.0';
 
 sub as_xml {
   my $self = shift;
@@ -114,7 +115,7 @@ __END__
 
 =head1 NAME
 
-MsOffice::Word::Surgeon::Run -- internal representation for a "run of text"
+MsOffice::Word::Surgeon::Run - internal representation for a "run of text"
 
 =head1 DESCRIPTION
 
