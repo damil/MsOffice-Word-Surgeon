@@ -100,7 +100,7 @@ sub remove_caps_property {
   my $self = shift;
 
   if ($self->{props} =~ s[<w:caps/>][]) {
-    $_->uppercase foreach @{$self->inner_texts};
+    $_->to_uppercase foreach @{$self->inner_texts};
   }
 }
 

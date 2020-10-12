@@ -131,7 +131,7 @@ sub replace {
 
 
 
-sub uppercase {
+sub to_uppercase {
   my $self = shift;
   $self->{literal_text} = uc($self->{literal_text});
 }
@@ -212,7 +212,7 @@ string corresponding to the result of all these replacements. This is the
 internal implementation for public method
 L<MsOffice::Word::Surgeon/replace>.
 
-=head2 uppercase
+=head2 to_uppercase
 
 Puts the literal text within the node into uppercase letters.
 
