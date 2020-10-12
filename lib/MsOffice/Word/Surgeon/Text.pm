@@ -122,9 +122,14 @@ sub replace {
   }
 
   # handle remaining contents after the last match
-  $add_to_current_text_node->($txt_after_last_match)
-    if $txt_after_last_match;
-  $maybe_clear_current_text_node->();
+  if ($txt_after_last_match) {
+    $add_to_current_text_node->($txt_after_last_match);
+    $maybe_clear_current_text_node->();
+  }
+  elsif ($xml_before) {
+    !$xml or croak "internal error : Text::xml_before was ignored during replacements";
+    $xml = $xml_before;
+  }
 
   return $xml;
 }
