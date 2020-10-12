@@ -11,7 +11,7 @@ use MsOffice::Word::Surgeon::Change;
 
 use namespace::clean -except => 'meta';
 
-our $VERSION = '1.01';
+our $VERSION = '1.02';
 
 # constant integers to specify indentation modes -- see L<XML::LibXML>
 use constant XML_NO_INDENT     => 0;
@@ -167,7 +167,7 @@ sub plain_text {
   $txt =~ s/(<w:p[ >])/\n$1/g;
 
   # replace tab nodes by ASCII tabs
-  $txt =~ s/<w:tab[^s][^>]*>x1/\t/g;
+  $txt =~ s/<w:tab[^s][^>]*>/\t/g;
 
   # remove all remaining XML tags
   $txt =~ s/<[^>]+>//g;
