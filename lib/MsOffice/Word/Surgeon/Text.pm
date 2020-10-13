@@ -1,6 +1,7 @@
 package MsOffice::Word::Surgeon::Text;
 use feature 'state';
 use Moose;
+use MooseX::StrictConstructor;
 use MsOffice::Word::Surgeon::Utils qw(maybe_preserve_spaces is_at_run_level);
 use Carp                           qw(croak);
 

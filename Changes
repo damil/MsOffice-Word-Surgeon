@@ -1,5 +1,8 @@
 Revision history for MsOffice-Word-Surgeon
 
+1.03     13.10.2020
+  - better parameter checking for new(); cleaner handling of revision ids; readability of source code improved  
+
 1.02     12.10.2020
   - fix bug in ->replace(): tabs or other contents outside of <w:t> was lost during replacement
 

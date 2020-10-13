@@ -1,6 +1,7 @@
 package MsOffice::Word::Surgeon;
 use 5.10.0;
 use Moose;
+use MooseX::StrictConstructor;
 use Archive::Zip                          qw(AZ_OK);
 use Encode                                qw(encode_utf8 decode_utf8);
 use Carp                                  qw(croak);
@@ -22,17 +23,17 @@ use constant MAIN_DOCUMENT => 'word/document.xml';
 
 has 'docx'      => (is => 'ro', isa => 'Str', required => 1);
 
-has 'zip'       => (is => 'ro',   isa => 'Archive::Zip',
+has 'zip'       => (is => 'ro', isa => 'Archive::Zip', init_arg => undef,
                     builder => '_zip',   lazy => 1);
 
-has 'contents'  => (is => 'rw',   isa => 'Str', init_arg => undef,
+has 'contents'  => (is => 'rw', isa => 'Str',          init_arg => undef,
                     builder => 'original_contents', lazy => 1,
-                    trigger => sub {shift->clear_runs},
-                   );
+                    trigger => sub {shift->clear_runs});
 
-has 'runs'      => (is => 'ro',   isa => 'ArrayRef', init_arg => undef,
+has 'runs'      => (is => 'ro', isa => 'ArrayRef',     init_arg => undef,
                     builder => '_runs', lazy => 1, clearer => 'clear_runs');
 
+has 'rev_id'    => (is => 'bare', isa => 'Num', default => 1, init_arg => undef);
 
 
 #======================================================================
@@ -114,16 +115,21 @@ sub _runs {
   ]x;
 
 
+  # split XML content into run fragments
   my $contents      = $self->contents;
   my @run_fragments = split m[$run_regex], $contents, -1;
   my @runs;
 
+  # build internal RUN objects
  RUN:
   while (my ($xml_before_run, $props, $run_contents) = splice @run_fragments, 0, 3) {
     $run_contents //= '';
 
+    # split XML of this run into text fragmentsn
     my @txt_fragments = split m[$txt_regex], $run_contents, -1;
     my @texts;
+
+    # build internal TEXT objects
   TXT:
     while (my ($xml_before_text, $txt_contents) = splice @txt_fragments, 0, 2) {
       next TXT if !$xml_before_text && !$txt_contents;
@@ -133,6 +139,7 @@ sub _runs {
        );
     }
 
+    # assemble TEXT objects into a RUN object
     next RUN if !$xml_before_run && !@texts;
     push @runs, MsOffice::Word::Surgeon::Run->new(
       xml_before  => $xml_before_run // '',
@@ -268,7 +275,7 @@ sub replace {
 sub change {
   my $self = shift;
 
-  my $change = MsOffice::Word::Surgeon::Change->new(@_);
+  my $change = MsOffice::Word::Surgeon::Change->new(rev_id => $self->{rev_id}++, @_);
   return $change->as_xml;
 }
 
