@@ -333,12 +333,16 @@ MsOffice::Word::Surgeon - tamper wit the guts of Microsoft docx documents
   my $pattern = join "|", keys %alias;
   my $replacement_callback = sub {
     my %args =  @_;
-    return $surgeon->change(to_delete => $args{matched},
-                            to_insert => $alias{$args{matched}},
-                            author    => __PACKAGE__,
-                           );
+    my $replacement = $surgeon->change(to_delete  => $args{matched},
+                                       to_insert  => $alias{$args{matched}},
+                                       run        => $args{run},
+                                       xml_before => $args{xml_before},
+                                       author     => __PACKAGE__,
+                                      );
+    return $replacement;
   };
-  $surgeon->replace(qr[$pattern], $replacement_callback);
+  my $anonymized = $surgeon->replace(qr[$pattern], $replacement_callback);
+  $surgeon->contents($anonymized);
 
   # save the result
   $surgeon->overwrite; # or ->save_as($new_filename);
