@@ -12,7 +12,7 @@ has 'props'       => (is => 'ro', isa => 'Str', required => 1);
 has 'inner_texts' => (is => 'ro', required => 1,
                       isa => 'ArrayRef[MsOffice::Word::Surgeon::Text]');
 
-our $VERSION = '1.03';
+our $VERSION = '1.04';
 
 sub as_xml {
   my $self = shift;
