@@ -38,7 +38,7 @@ sub as_xml {
   my $date      = $self->date;
   my $author    = $self->author;
   my $props     = $self->run && $self->run->props
-                  ? "<w:rPr>" . $self->run->props . "</w:rPr>"
+    ? "<w:rPr>" . $self->run->props . "</w:rPr>"
                   : "";
   my $xml       = "";
 
@@ -81,7 +81,9 @@ See that method for a description of the API.
 
 =head1 INTERNALS
 
-Each call generates a fresh revision id, inserted as C<w:id> attribute to the
+The constructor requires an integer C<rev_id> argument.
+The C<rev_id> is fed by the surgeon object which generates a fresh value at each call.
+This is inserted as C<w:id> attribute to the
 C<< <w:del> >> and C<< <w:ins> >> nodes -- but it doesn't seem to be used for
 any purpose by MsWord.
 

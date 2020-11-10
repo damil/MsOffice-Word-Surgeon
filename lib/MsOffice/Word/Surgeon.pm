@@ -34,7 +34,8 @@ has 'runs'      => (is => 'ro', isa => 'ArrayRef',     init_arg => undef,
                     builder => '_runs', lazy => 1, clearer => 'clear_runs');
 
 has 'rev_id'    => (is => 'bare', isa => 'Num', default => 1, init_arg => undef);
-
+   # used by the change() method for creating *::Change objects -- each instance
+   # gets a fresh value
 
 #======================================================================
 # GLOBAL VARIABLES
