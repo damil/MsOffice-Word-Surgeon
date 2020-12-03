@@ -1,3 +1,17 @@
+=pod
+
+THINK 
+  - empty paragraphs because instructions like [% FOREACH %], etc.
+      - prune empty paras after process()
+      - 
+  - yellow : keep Pr props
+  - green : remove paragraph or table line
+
+
+=cut
+
+
+
 package MsOffice::Word::Surgeon;
 use 5.10.0;
 use Moose;
@@ -307,6 +321,27 @@ sub save_as {
     or die "error writing zip archive to $docx";
 }
 
+
+
+#======================================================================
+# TEMPLATING
+#======================================================================
+
+sub compile_template {
+  my ($self, %options) = @_;
+
+  my $template_contents = join "", map {$_->template_fragment(%options)}  @{$self->runs};
+
+  require MsOffice::Word::Surgeon::Template;
+
+  return MsOffice::Word::Surgeon::Template->new(surgeon  => $self,
+                                                contents => $template_contents,
+                                               );
+
+}
+
+
+
 1;
 
 __END__
@@ -349,15 +384,30 @@ MsOffice::Word::Surgeon - tamper wit the guts of Microsoft docx documents
   $surgeon->overwrite; # or ->save_as($new_filename);
 
 
+  # use the contents as a template
+  $surgeon->reduce_all_noises;
+  $surgeon->merge_runs;
+  my $template = $surgeon->compile_template(
+        highlights => 'yellow',
+        engine     => 'Template', # or Mojo::Template
+   );
+  my $new_doc = $template->process(data => \%some_data_tree, %other_options);
+  $new_doc->save_as($new_doc_filename);
+
+
+
 =head1 DESCRIPTION
 
 =head2 Purpose
 
 This module supports a few operations for modifying or extracting text
-from Microsoft Word documents in '.docx' format -- therefore the name
-'surgeon'. Since a surgeon does not give life, there is no support for
-creating fresh documents; if you have such needs, use one of the other
-packages listed in the L<SEE ALSO> section.
+from Microsoft Word documents in '.docx' format.
+It can also collaborate with L<Template> or L<Mojo::Template> for
+interpreting an existing Word document as a template, and fill that
+template with data to generate new documents.
+Since a surgeon does not give live, the module cannot generate fresh
+documents from scratch -- if you have such needs,
+use one of the other packages listed in the L<SEE ALSO> section.
 
 Some applications for this module are :
 
