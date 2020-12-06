@@ -332,6 +332,40 @@ sub compile_template {
 
   my $template_contents = join "", map {$_->template_fragment(%options)}  @{$self->runs};
 
+  my $rx_para = qr{
+    <w:p            [^>]*>
+      <w:r          [^>]*>
+        <w:t        [^>]*>
+          (\[% .*? %\])   (*SKIP)
+          <!--TT2green-->
+        </w:t>
+      </w:r>
+      (?: <w:bookmark   [^>]*> )*
+    </w:p>
+   }sx;
+
+  my $rx_row = qr{
+    <w:tr      [^>]*>
+      <w:tc    [^>]*>
+         (?:<w:tcPr> .*? </w:tcPr> (*SKIP) )?
+         $rx_para
+      </w:tc>
+      (?:<w:tc> .*? </w:tc>   (*SKIP) )*
+    </w:tr>
+   }sx;
+
+  warn "T1 : $template_contents\n";
+
+  # paragraphs to be ignored
+  $template_contents =~ s/$rx_row/$1/g;
+
+  warn "T2 : $template_contents\n";
+
+  $template_contents =~ s/$rx_para/$1/g;
+
+  warn "T3 : $template_contents\n";
+
+
   require MsOffice::Word::Surgeon::Template;
 
   return MsOffice::Word::Surgeon::Template->new(surgeon  => $self,

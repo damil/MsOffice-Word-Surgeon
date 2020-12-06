@@ -15,7 +15,7 @@ $surgeon->merge_runs;
 
 
 my $template = $surgeon->compile_template(
-  highlights => 'yellow',
+  text_color => 'yellow',
  );
 my %data = (
   foo => 'FOFOLLE',
