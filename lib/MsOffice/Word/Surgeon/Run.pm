@@ -106,44 +106,6 @@ sub remove_caps_property {
 
 
 
-
-sub template_fragment {
-  my ($self, %options) = @_;
-
-  my $props = $self->props;
-  my $text_color         = $options{text_color}         // "yellow";
-  my $instructions_color = $options{instructions_color} // "green";
-
-warn "PROPS: $props\n";
-
-
-  if ($props =~ s{<w:highlight w:val="($text_color|$instructions_color)"/>}{}) {
-    my $col = $1;
-    my $xml  = $self->xml_before;
-    if (@{$self->inner_texts}) {
-      $xml .= "<w:r>";
-      $xml .= "<w:rPr>" . $props . "</w:rPr>" if $props;
-      $xml .= "<w:t>[% ";
-      $xml .= $_->literal_text . "\n" foreach @{$self->inner_texts};
-        # NOTE : adding "\n" because end of lines are used by templating modules
-      $xml .= " %]<!--TT2$col--></w:t>";
-      $xml .= "</w:r>";
-
-      # TODO : factorize code in common  with ->as_xml() method
-    }
-    elsif ($props =~ s{<w:highlight w:val="$instructions_color"/>}{}) {
-
-
-    }
-    warn "XML: $xml\n";
-
-    return $xml;
-  }
-  else {
-    return $self->as_xml;
-  }
-}
-
 1;
 
 __END__ 
