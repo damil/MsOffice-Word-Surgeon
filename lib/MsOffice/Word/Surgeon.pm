@@ -43,6 +43,7 @@ has 'rev_id'    => (is => 'bare', isa => 'Num', default => 1, init_arg => undef)
 
 # Various regexes for removing uninteresting XML information
 my %noise_reduction_regexes = (
+  goback_bookmark       => qr(<w:bookmarkStart[^>]+?w:name="_GoBack"/><w:bookmarkEnd[^>]+/>),
   proof_checking        => qr(<w:(?:proofErr[^>]+|noProof/)>),
   revision_ids          => qr(\sw:rsid\w+="[^"]+"),
   complex_script_bold   => qr(<w:bCs/>),
@@ -51,8 +52,8 @@ my %noise_reduction_regexes = (
   empty_run_props       => qr(<w:rPr></w:rPr>),
  );
 
-my @noise_reduction_list     = qw/proof_checking  revision_ids complex_script_bold
-                                  page_breaks language empty_run_props/;
+my @noise_reduction_list = qw/goback_bookmark proof_checking revision_ids
+                              complex_script_bold page_breaks language empty_run_props/;
 
 
 #======================================================================
