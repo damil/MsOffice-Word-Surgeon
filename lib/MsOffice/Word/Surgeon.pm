@@ -175,6 +175,9 @@ sub plain_text {
   # replace opening paragraph tags by newlines
   $txt =~ s/(<w:p[ >])/\n$1/g;
 
+  # replace break tags by newlines
+  $txt =~ s/<br>/\n/g;
+
   # replace tab nodes by ASCII tabs
   $txt =~ s/<w:tab[^s][^>]*>/\t/g;
 
