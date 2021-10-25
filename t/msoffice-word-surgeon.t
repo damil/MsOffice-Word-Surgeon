@@ -20,7 +20,6 @@ like $plain_text, qr/1st/, "found 1st";
 like $plain_text, qr/2nd/, "found 2nd";
 like $plain_text, qr/paragraph\ncontains a soft line break/, "soft line break";
 
-
 $surgeon->reduce_all_noises;
 $surgeon->unlink_fields;
 $surgeon->merge_runs;
@@ -28,6 +27,9 @@ $surgeon->merge_runs;
 my $contents = $surgeon->contents;
 like $contents, qr/because documents edited in MsWord often have run boundaries across sentences/,
   "XML after merging runs";
+
+
+like $contents, qr/somme de 1'200/, "do not remove runs containing '0'";
 
 
 my $new_xml = $surgeon->replace(qr/\bMsWord\b/,
