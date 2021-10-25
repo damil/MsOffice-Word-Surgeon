@@ -17,7 +17,8 @@ sub as_xml {
   my $self = shift;
 
   my $xml = $self->xml_before // '';
-  if (my $lit_txt = $self->literal_text) {
+  my $lit_txt = $self->literal_text;
+  if (defined $lit_txt && $lit_txt ne '') {
     my $space_attr  = maybe_preserve_spaces($lit_txt);
     $xml .= "<w:t$space_attr>$lit_txt</w:t>";
   }
