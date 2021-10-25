@@ -20,9 +20,7 @@ like $plain_text, qr/1st/, "found 1st";
 like $plain_text, qr/2nd/, "found 2nd";
 like $plain_text, qr/paragraph\ncontains a soft line break/, "soft line break";
 
-$surgeon->reduce_all_noises;
-$surgeon->unlink_fields;
-$surgeon->merge_runs(no_caps => 1);
+$surgeon->cleanup_XML(no_caps => 1);
 
 my $contents = $surgeon->contents;
 like $contents, qr/because documents edited in MsWord often have run boundaries across sentences/,
@@ -31,7 +29,7 @@ like $contents, qr/because documents edited in MsWord often have run boundaries 
 
 like $contents, qr/somme de 1'200/,       "do not remove runs containing '0'";
 like $contents, qr/SMALL &amp; CAPS LTD/, "w:caps preserves HTML entities";
-
+like $contents, qr/Condamne SMALL/,       "remove bookmarks";
 
 my $new_xml = $surgeon->replace(qr/\bMsWord\b/,
                                 sub {"Microsoft Word"},

@@ -43,7 +43,6 @@ has 'rev_id'    => (is => 'bare', isa => 'Num', default => 1, init_arg => undef)
 
 # Various regexes for removing uninteresting XML information
 my %noise_reduction_regexes = (
-  goback_bookmark       => qr(<w:bookmarkStart[^>]+?w:name="_GoBack"/><w:bookmarkEnd[^>]+/>),
   proof_checking        => qr(<w:(?:proofErr[^>]+|noProof/)>),
   revision_ids          => qr(\sw:rsid\w+="[^"]+"),
   complex_script_bold   => qr(<w:bCs/>),
@@ -52,9 +51,8 @@ my %noise_reduction_regexes = (
   empty_run_props       => qr(<w:rPr></w:rPr>),
  );
 
-my @noise_reduction_list = qw/goback_bookmark proof_checking revision_ids
+my @noise_reduction_list = qw/proof_checking revision_ids
                               complex_script_bold page_breaks language empty_run_props/;
-
 
 #======================================================================
 # BUILDING
@@ -192,13 +190,13 @@ sub plain_text {
 #======================================================================
 
 sub cleanup_XML {
-  my ($self) = @_;
+  my ($self, @merge_args) = @_;
 
   $self->reduce_all_noises;
   $self->unlink_fields;
-  $self->merge_runs;
+  $self->suppress_bookmarks;
+  $self->merge_runs(@merge_args);
 }
-
 
 sub noise_reduction_regex {
   my ($self, $regex_name) = @_;
@@ -213,9 +211,10 @@ sub reduce_noise {
   # gather regexes to apply, given either directly as regex refs, or as names of builtin regexes
   my @regexes = map {ref $_ eq 'Regexp' ? $_ : $self->noise_reduction_regex($_)} @noises;
 
-  # get contents, apply all regexes, put back the modified contents
+  # get contents, apply all regexes, put back the modified contents.
   my $contents = $self->contents;
-  $contents =~ s/$_//g foreach @regexes;
+  no warnings 'uninitialized'; # for regexes without capture groups, $1 will be undef
+  $contents =~ s/$_/$1/g foreach @regexes;
   $self->contents($contents);
 }
 
@@ -223,6 +222,24 @@ sub reduce_all_noises {
   my $self = shift;
 
   $self->reduce_noise(@noise_reduction_list);
+}
+
+sub suppress_bookmarks {
+  my ($self) = @_;
+
+  my $contents = $self->contents;
+  my $n_bookmarks = $contents =~ s{<w:bookmarkStart     # initial tag
+                                     \s+w:id="(\d+)"    # 'id' attribute, bookmark identifier
+                                       [^>]+?           # other attributes in this tag
+                                      />                # end of this tag
+                                      (.*?)             # bookmark contents (may be empty)
+                                      <w:bookmarkEnd    # ending tag
+                                        \s+w:id="\1"    # same 'id' attribute
+                                       />}              # end of this tag
+                                  {$2}gx;               # just keep what was inside the bookmark
+
+  # if the contents was modified, re-inject it
+  $self->contents($contents) if $n_bookmarks;
 }
 
 sub merge_runs {
@@ -271,6 +288,7 @@ sub unlink_fields {
 
   $self->reduce_noise($field_instruction_txt_rx, $field_boundary_rx, $simple_field_rx);
 }
+
 
 sub replace {
   my ($self, $pattern, $replacement_callback, %replacement_args) = @_;
@@ -482,7 +500,8 @@ restores the complete document.
   $surgeon->cleanup_XML;
 
 Apply several other methods for removing unnecessary nodes within the internal
-XML. This method successively calls L</reduce_all_noises>, L</unlink_fields> and L</merge_runs>.
+XML. This method successively calls L</reduce_all_noises>, L</unlink_fields>,
+L</suppress_bookmarks> and L</merge_runs>.
 
 
 =head3 reduce_noise
@@ -504,7 +523,6 @@ are applied to the whole XML contents, not only to run nodes.
 Returns the builtin regex corresponding to the given name.
 Known regexes are :
 
-  goback_bookmark      => qr(<w:bookmarkStart[^>]+?w:name="_GoBack"/><w:bookmarkEnd[^>]+/>),
   proof_checking       => qr(<w:(?:proofErr[^>]+|noProof/)>),
   revision_ids         => qr(\sw:rsid\w+="[^"]+"),
   complex_script_bold  => qr(<w:bCs/>),
@@ -523,6 +541,13 @@ Applies all regexes from the previous method.
 Removes all fields from the document, just leaving the current
 value stored in each field. This is the equivalent of performing Ctrl-Shift-F9
 on the whole document.
+
+=head3 suppress_bookmarks
+
+Removes all bookmarks in the document. This is useful because
+MsWord may silently insert bookmarks in unexpected places; therefore
+some searches within the text may fail because of such bookmarks.
+
 
 =head3 merge_runs
 
