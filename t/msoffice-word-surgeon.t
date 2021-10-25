@@ -29,10 +29,8 @@ like $contents, qr/because documents edited in MsWord often have run boundaries 
   "XML after merging runs";
 
 
-like $contents, qr/somme de 1'200/,   "do not remove runs containing '0'";
-like $contents, qr/SMALL & CAPS LTD/, "w:caps preserve HTML entities";
-
-
+like $contents, qr/somme de 1'200/,       "do not remove runs containing '0'";
+like $contents, qr/SMALL &amp; CAPS LTD/, "w:caps preserves HTML entities";
 
 
 my $new_xml = $surgeon->replace(qr/\bMsWord\b/,
