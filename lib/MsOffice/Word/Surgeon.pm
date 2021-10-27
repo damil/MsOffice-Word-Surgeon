@@ -193,8 +193,8 @@ sub cleanup_XML {
   my ($self, @merge_args) = @_;
 
   $self->reduce_all_noises;
-  $self->unlink_fields;
-  $self->suppress_bookmarks;
+  my @names_of_ASK_fields = $self->unlink_fields;
+  $self->suppress_bookmarks(@names_of_ASK_fields);
   $self->merge_runs(@merge_args);
 }
 
@@ -225,21 +225,33 @@ sub reduce_all_noises {
 }
 
 sub suppress_bookmarks {
-  my ($self) = @_;
+  my ($self, @names_to_erase) = @_;
 
+  # regex to find bookmarks markup
+  state $bookmark_rx = qr{
+     <w:bookmarkStart         # initial tag
+       .+? w:id="(\d+)"       # 'id' attribute, bookmark identifier -- capture 1
+       .+? w:name="([^"]+)"   # 'name' attribute                    -- capture 2
+       .*? />                 # end of this tag
+       (.*?)                  # bookmark contents (may be empty)    -- capture 3
+     <w:bookmarkEnd           # ending tag
+       \s+ w:id="\1"          # same 'id' attribute
+       .*? />                 # end of this tag
+    }sx;
+
+  # closure to decide what to do with bookmark contents
+  my %should_erase_contents = map {($_ => 1)} @names_to_erase;
+  my $deal_with_bookmark_text = sub {
+    my ($bookmark_name, $bookmark_contents) = @_;
+    return $should_erase_contents{$bookmark_name} ? "" : $bookmark_contents;
+  };
+
+  # remove bookmarks markup
   my $contents = $self->contents;
-  my $n_bookmarks = $contents =~ s{<w:bookmarkStart     # initial tag
-                                     \s+w:id="(\d+)"    # 'id' attribute, bookmark identifier
-                                       [^>]+?           # other attributes in this tag
-                                      />                # end of this tag
-                                      (.*?)             # bookmark contents (may be empty)
-                                      <w:bookmarkEnd    # ending tag
-                                        \s+w:id="\1"    # same 'id' attribute
-                                       />}              # end of this tag
-                                  {$2}gx;               # just keep what was inside the bookmark
+  $contents    =~ s{$bookmark_rx}{$deal_with_bookmark_text->($2, $3)}eg;
 
-  # if the contents was modified, re-inject it
-  $self->contents($contents) if $n_bookmarks;
+  # re-inject the modified contents
+  $self->contents($contents);
 }
 
 sub merge_runs {
@@ -274,8 +286,18 @@ sub merge_runs {
   $self->contents(join "", map {$_->as_xml} @new_runs);
 }
 
+
+
+
+
 sub unlink_fields {
   my $self = shift;
+
+  # must find out what are the ASK fields before erasing the markup
+  state $ask_field_rx = qr[<w:instrText[^>]+?>\s+ASK\s+(\w+)];
+  my $contents            = $self->contents;
+  my @names_of_ASK_fields = $contents =~ /$ask_field_rx/g;
+
 
   # regexes to remove field nodes and "field instruction" nodes
   state $field_instruction_txt_rx = qr[<w:instrText.*?</w:instrText>];
@@ -287,6 +309,8 @@ sub unlink_fields {
   state $simple_field_rx          = qr[</?w:fldSimple[^>]*>];
 
   $self->reduce_noise($field_instruction_txt_rx, $field_boundary_rx, $simple_field_rx);
+
+  return @names_of_ASK_fields;
 }
 
 

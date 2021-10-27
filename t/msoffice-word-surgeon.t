@@ -27,9 +27,14 @@ like $contents, qr/because documents edited in MsWord often have run boundaries 
   "XML after merging runs";
 
 
-like $contents, qr/somme de 1'200/,       "do not remove runs containing '0'";
-like $contents, qr/SMALL &amp; CAPS LTD/, "w:caps preserves HTML entities";
-like $contents, qr/Condamne SMALL/,       "remove bookmarks";
+like $contents,   qr/somme de 1'200/,                   "do not remove runs containing '0'";
+like $contents,   qr/SMALL &amp; CAPS LTD/,             "w:caps preserves HTML entities";
+unlike $contents, qr/bookmarkStart/,                    "remove bookmarks (no markup)";
+unlike $contents, qr/_GoBack/,                          "remove bookmarks (no _GoBack)";
+like $contents,   qr/Condamne SMALL/,                   "remove bookmarks (contents preserved)";
+like $contents,   qr/do you prefer Foo \? Really \?/,   "ASK field (1/2)";
+like $contents,   qr/like this : Foo \?\B/,             "ASK field (2/2)";
+
 
 my $new_xml = $surgeon->replace(qr/\bMsWord\b/,
                                 sub {"Microsoft Word"},
