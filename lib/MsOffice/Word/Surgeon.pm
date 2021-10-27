@@ -562,15 +562,31 @@ Applies all regexes from the previous method.
 
 =head3 unlink_fields
 
+  my @names_of_ASK_fields = $self->unlink_fields;
+
 Removes all fields from the document, just leaving the current
 value stored in each field. This is the equivalent of performing Ctrl-Shift-F9
 on the whole document.
 
+The return value is a list of names of ASK fields within the document.
+Such names should then be passed to the L</suppress_bookmarks> method
+(see below).
+
+
 =head3 suppress_bookmarks
 
-Removes all bookmarks in the document. This is useful because
+  $surgeon->suppress_bookmarks(@names_to_erase);
+
+Removes bookmarks markup in the document. This is useful because
 MsWord may silently insert bookmarks in unexpected places; therefore
 some searches within the text may fail because of such bookmarks.
+
+By default, this method only removes the bookmarks markup, leaving
+intact the contents of the bookmark. However, when the name of a
+bookmark belongs to the list C<< @names_to_erase >>, the contents
+is also removed. Currently this is used for suppressing ASK fields,
+because such fields contain a bookmark content that is never displayed by MsWord.
+
 
 
 =head3 merge_runs
