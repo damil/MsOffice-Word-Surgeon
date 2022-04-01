@@ -27,28 +27,24 @@ like $contents, qr/because documents edited in MsWord often have run boundaries 
   "XML after merging runs";
 
 
-like $contents,   qr/somme de 1'200/,                   "do not remove runs containing '0'";
-like $contents,   qr/SMALL &amp; CAPS LTD/,             "w:caps preserves HTML entities";
-unlike $contents, qr/bookmarkStart/,                    "remove bookmarks (no markup)";
-unlike $contents, qr/_GoBack/,                          "remove bookmarks (no _GoBack)";
-like $contents,   qr/Condamne SMALL/,                   "remove bookmarks (contents preserved)";
-like $contents,   qr/do you prefer Foo \? Really \?/,   "ASK field (1/2)";
-like $contents,   qr/like this : Foo \?\B/,             "ASK field (2/2)";
+like $contents,   qr/somme de 1'200/,                             "do not remove runs containing '0'";
+like $contents,   qr/SMALL &amp; CAPS LTD/,                       "w:caps preserves HTML entities";
+unlike $contents, qr/bookmarkStart/,                              "remove bookmarks (no markup)";
+unlike $contents, qr/_GoBack/,                                    "remove bookmarks (no _GoBack)";
+like $contents,   qr/Condamne SMALL/,                             "remove bookmarks (contents preserved)";
+like $contents,   qr/do you prefer Foo \? Really \?/,             "ASK field (1/2)";
+like $contents,   qr/like this : Foo \?\B/,                       "ASK field (2/2)";
 like $contents,   qr/soft hyphens that should really be removed/, "soft hyphens";
-
-
 
 my $new_xml = $surgeon->replace(qr/\bMsWord\b/,
                                 sub {"Microsoft Word"},
                                );
-like $new_xml, qr/edited in Microsoft Word/,  "after replace";
+like $new_xml, qr/edited in Microsoft Word/,                      "after replace";
 
 $surgeon->contents($new_xml);
 $plain_text = $surgeon->plain_text;
 my ($test_tabs) = $plain_text =~ /(\n.*?TAB.*)/;
 like $test_tabs, qr/starts\twith an\tinitial TAB, and also has\tmany internal TABS/,
-  "TABS were preserved";
-
-
+                                                                  "TABS were preserved";
 
 done_testing();
