@@ -3,6 +3,8 @@ use warnings;
 use Test::More;
 use MsOffice::Word::Surgeon;
 
+my $do_save_results = $ARGV[0] && $ARGV[0] eq 'save';
+
 (my $dir = $0) =~ s[msoffice-word-surgeon.t$][];
 $dir ||= ".";
 my $sample_file = "$dir/etc/MsOffice-Word-Surgeon.docx";
@@ -20,7 +22,7 @@ like $plain_text, qr/1st/, "found 1st";
 like $plain_text, qr/2nd/, "found 2nd";
 like $plain_text, qr/paragraph\ncontains a soft line break/, "soft line break";
 
-$surgeon->cleanup_XML(no_caps => 1);
+$surgeon->all_parts_do(cleanup_XML => (no_caps => 1));
 
 my $contents = $surgeon->contents;
 like $contents, qr/because documents edited in MsWord often have run boundaries across sentences/,
@@ -46,5 +48,8 @@ $plain_text = $surgeon->plain_text;
 my ($test_tabs) = $plain_text =~ /(\n.*?TAB.*)/;
 like $test_tabs, qr/starts\twith an\tinitial TAB, and also has\tmany internal TABS/,
                                                                   "TABS were preserved";
+
+
+$surgeon->save_as("surgeon_result.docx")  if $do_save_results;
 
 done_testing();

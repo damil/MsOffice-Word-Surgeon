@@ -69,11 +69,7 @@ sub zip_member_name {
 sub original_contents { # can also be called later, not only as lazy constructor
   my $self = shift;
 
-  my $bytes      = $self->surgeon->zip->contents($self->zip_member_name)
-    or die "no contents for part ", $self->part_name;
-  my $contents = decode_utf8($bytes);
-
-  return $contents;
+  return $self->surgeon->zip_member($self->zip_member_name);
 }
 
 
@@ -175,8 +171,8 @@ sub cleanup_XML {
   my ($self, @merge_args) = @_;
 
   $self->reduce_all_noises;
-  my @names_of_ASK_fields = $self->unlink_fields;
-  $self->suppress_bookmarks(@names_of_ASK_fields);
+  my $names_of_ASK_fields = $self->unlink_fields;
+  $self->suppress_bookmarks(@$names_of_ASK_fields);
   $self->merge_runs(@merge_args);
 }
 
@@ -292,7 +288,7 @@ sub unlink_fields {
 
   $self->reduce_noise($field_instruction_txt_rx, $field_boundary_rx, $simple_field_rx);
 
-  return @names_of_ASK_fields;
+  return \@names_of_ASK_fields;
 }
 
 
@@ -338,12 +334,8 @@ sub change {
 sub _update_contents_in_zip {
   my $self = shift;
 
-  $self->surgeon->zip->contents($self->zip_member_name, encode_utf8($self->contents));
+  $self->surgeon->zip_member($self->zip_member_name, $self->contents);
 }
-
-
-
-
 
 
 1;

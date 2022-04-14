@@ -14,30 +14,22 @@ use namespace::clean -except => 'meta';
 
 our $VERSION = '1.08';
 
+has 'docx'          => (is => 'ro', isa => 'Str', required => 1);
 
-# names of zip members found in every .docx document
-use constant MAIN_DOCUMENT => 'document';
-use constant CONTENT_TYPES => '[Content_Types].xml';
-
-
-has 'docx'      => (is => 'ro', isa => 'Str', required => 1);
-
-has 'zip'       => (is => 'ro', isa => 'Archive::Zip', init_arg => undef,
-                    builder => '_zip',   lazy => 1);
-
+has 'zip'           => (is => 'ro', isa => 'Archive::Zip', init_arg => undef,
+                        builder => '_zip',   lazy => 1);
 
 has 'package_parts' => (is => 'ro', isa => 'HashRef[MsOffice::Word::Surgeon::PackagePart]', init_arg => undef,
                         builder => '_package_parts', lazy => 1);
 
-
-has 'document'  => (is => 'ro', isa => 'MsOffice::Word::Surgeon::PackagePart', init_arg => undef,
-                    builder => '_document', lazy => 1,
-                    handles => [qw/contents original_contents indented_contents plain_text replace/]
-                   );
-
+has 'document'      => (is => 'ro', isa => 'MsOffice::Word::Surgeon::PackagePart', init_arg => undef,
+                        builder => '_document', lazy => 1,
+                        handles => [qw/contents original_contents indented_contents plain_text replace/]
+                       );
 
 
-has 'rev_id'    => (is => 'bare', isa => 'Num', default => 1, init_arg => undef);
+
+has 'rev_id'        => (is => 'bare', isa => 'Num', default => 1, init_arg => undef);
    # used by the change() method for creating *::Change objects -- each instance
    # gets a fresh value
 
@@ -81,19 +73,25 @@ sub _zip {
 sub _package_parts {
   my $self = shift;
 
-  my $bytes    = $self->zip->contents(CONTENT_TYPES)
-    or die "no zip member for ", CONTENT_TYPES;
-  my $xml = decode_utf8($bytes);
+  my $xml = $self->zip_member('[Content_Types].xml');
 
   my @headers = $xml =~ m[PartName="/word/(header\d+).xml"]g;
   my @footers = $xml =~ m[PartName="/word/(footer\d+).xml"]g;
 
   my %package_parts = map {$_ => MsOffice::Word::Surgeon::PackagePart->new(surgeon   => $self,
                                                                            part_name => $_)}
-                          (MAIN_DOCUMENT, @headers, @footers);
+                          ('document', @headers, @footers);
 
   return \%package_parts;
 }
+
+
+sub _document {shift->package_part('document')}
+
+
+#======================================================================
+# methods
+#======================================================================
 
 
 sub package_part {
@@ -104,27 +102,49 @@ sub package_part {
 }
 
 
-sub parts { # THINK : is this a good name ?
+
+sub zip_member {
+  my ($self, $member_name, $new_content) = @_;
+
+  if (! defined $new_content) {
+    my $bytes = $self->zip->contents($member_name)
+      or die "no zip member for $member_name";
+    return decode_utf8($bytes);
+  }
+  else {
+    my $bytes = encode_utf8($new_content);
+    return $self->zip->contents($member_name, $bytes);
+  }
+}
+
+
+sub headers {
   my ($self) = @_;
-  return values $self->package_parts->%*;
+  return sort {substr($a, 6) <=> substr($b, 6)} grep {/^header/} keys $self->package_parts->%*;
+}
+
+sub footers {
+  my ($self) = @_;
+  return sort {substr($a, 6) <=> substr($b, 6)} grep {/^footer/} keys $self->package_parts->%*;
 }
 
 
-sub _document {shift->package_part('document')}
-
 #======================================================================
-# methods applied to all parts
+# METHODS PROPAGATED TO ALL PARTS
 #======================================================================
 
-for my $method_name (qw/cleanup_XML reduce_noises reduce_all_noises
-                        suppress_bookmarks merge_runs unlink_fields/) {
-  no strict 'refs';
-  *{$method_name} = sub {
-    my $self = shift;
 
-    $_->$method_name(@_) foreach $self->parts;
-  };
+sub all_parts_do {
+  my ($self, $method_name, @args) = @_;
+
+  my $parts = $self->package_parts;
+
+  my %result;
+
+  $result{$_} = $parts->{$_}->$method_name(@args) for keys %$parts;
+  return \%result;
 }
+
 
 
 #======================================================================
@@ -141,8 +161,6 @@ sub overwrite {
 
 sub save_as {
   my ($self, $docx) = @_;
-
-  $DB::single = 1;
 
   $_->_update_contents_in_zip foreach values $self->package_parts->%*;
   $self->zip->writeToFileNamed($docx) == AZ_OK
@@ -340,13 +358,13 @@ Applies all regexes from the previous method.
 
 =head3 unlink_fields
 
-  my @names_of_ASK_fields = $self->unlink_fields;
+  my $names_of_ASK_fields = $self->unlink_fields;
 
 Removes all fields from the document, just leaving the current
 value stored in each field. This is the equivalent of performing Ctrl-Shift-F9
 on the whole document.
 
-The return value is a list of names of ASK fields within the document.
+The return value is an arrayref to a  list of names of ASK fields within the document.
 Such names should then be passed to the L</suppress_bookmarks> method
 (see below).
 
