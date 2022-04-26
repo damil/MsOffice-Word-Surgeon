@@ -13,6 +13,9 @@ diag( "Testing MsOffice::Word::Surgeon $MsOffice::Word::Surgeon::VERSION, Perl $
 
 my $surgeon = MsOffice::Word::Surgeon->new($sample_file);
 
+$surgeon->part($_)->replace(qr/\bPage\b/ => sub {"Pagina"}, keep_xml_as_is => 1) for $surgeon->headers;
+
+
 my $plain_text = $surgeon->plain_text;
 like $plain_text, qr/because documents edited in MsWord often have run boundaries across sentences/,
   "plain text";
@@ -48,6 +51,22 @@ $plain_text = $surgeon->plain_text;
 my ($test_tabs) = $plain_text =~ /(\n.*?TAB.*)/;
 like $test_tabs, qr/starts\twith an\tinitial TAB, and also has\tmany internal TABS/,
                                                                   "TABS were preserved";
+
+
+is_deeply [$surgeon->headers], [qw/header1 header2 header3/],     "headers";
+is_deeply [$surgeon->footers], [qw/footer1 footer2 footer3/],     "footers";
+
+
+#$surgeon->all_parts_do(replace => qr/\bPage\b/ => sub {"Pagina"});
+
+# $surgeon->part($_)->replace(qr/\bPage\b/ => sub {"Pagina"}, keep_xml_as_is => 1) for $surgeon->headers;
+
+
+use Path::Tiny;
+my $img = path("d:/temp/foo.png")->slurp_raw;
+my $rId = $surgeon->document->add_image($img);
+warn "created rId $rId\n";
+
 
 
 $surgeon->save_as("surgeon_result.docx")  if $do_save_results;

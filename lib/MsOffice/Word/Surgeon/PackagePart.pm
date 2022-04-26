@@ -4,6 +4,7 @@ use Moose;
 use MooseX::StrictConstructor;
 use MsOffice::Word::Surgeon::Utils qw(maybe_preserve_spaces is_at_run_level);
 use XML::LibXML;
+use List::Util                     qw(max);
 use Carp                           qw(croak);
 use Encode                         qw(encode_utf8 decode_utf8);
 
@@ -13,23 +14,25 @@ use constant XML_SIMPLE_INDENT => 1;
 
 use namespace::clean -except => 'meta';
 
-has 'surgeon'       => (is => 'ro', isa => 'MsOffice::Word::Surgeon', required => 1, weak_ref => 1);
-has 'part_name'     => (is => 'ro', isa => 'Str',                     required => 1);
-
-
-
-
 our $VERSION = '1.08';
 
 
+has 'surgeon'       => (is => 'ro', isa => 'MsOffice::Word::Surgeon', required => 1, weak_ref => 1);
 
-has 'contents'  => (is => 'rw', isa => 'Str',          init_arg => undef,
-                    builder => 'original_contents', lazy => 1,
-                    trigger => sub {shift->clear_runs});
+has 'part_name'     => (is => 'ro', isa => 'Str',                     required => 1);
 
-has 'runs'      => (is => 'ro', isa => 'ArrayRef',     init_arg => undef,
-                    builder => '_runs', lazy => 1, clearer => 'clear_runs');
+has 'contents'      => (is => 'rw', isa => 'Str',          init_arg => undef,
+                        builder => 'original_contents', lazy => 1,
+                        trigger => sub {shift->clear_runs});
 
+has 'runs'          => (is => 'ro', isa => 'ArrayRef',     init_arg => undef,
+                        builder => '_runs', lazy => 1, clearer => 'clear_runs');
+
+has 'relationships' => (is => 'ro', isa => 'ArrayRef',     init_arg => undef,
+                         builder => '_relationships', lazy => 1);
+
+has 'images'        => (is => 'ro', isa => 'HashRef',      init_arg => undef,
+                        builder => '_images', lazy => 1);
 
 
 
@@ -52,25 +55,9 @@ my @noise_reduction_list = qw/proof_checking revision_ids
                               complex_script_bold page_breaks language 
                               empty_run_props soft_hyphens/;
 
-
-
-
 #======================================================================
-# METHODS
+# LAZY ATTRIBUTE CONSTRUCTORS
 #======================================================================
-
-sub zip_member_name {
-  my $self = shift;
-  return sprintf "word/%s.xml", $self->part_name;
-}
-
-
-
-sub original_contents { # can also be called later, not only as lazy constructor
-  my $self = shift;
-
-  return $self->surgeon->zip_member($self->zip_member_name);
-}
 
 
 sub _runs {
@@ -125,6 +112,95 @@ sub _runs {
 
   return \@runs;
 }
+
+
+sub _relationships {
+  my $self = shift;
+
+  my $rel_xml = $self->_rels_xml;
+
+  state $rx_relationship = qr[<Relationship     \s+
+                               Id="(\w+)"       \s+
+                               Type="([^"]+?)"  \s+
+                               Target="([^"]+?)"/>]x;
+
+  my @relationships;
+  while ($rel_xml =~ /$rx_relationship/g) {
+    my %r;
+    @r{qw/rId type target/} = ($1, $2, $3);
+    ($r{num}        = $r{rId})  =~ s[^\D+][];
+    ($r{short_type} = $r{type}) =~ s[^.*/][];
+    $relationships[$r{num}] = \%r;
+  }
+  return \@relationships;
+}
+
+
+sub _images {
+  my $self = shift;
+
+  # get relationship ids associated with images
+  my %rel_image  = map  {$_->{rId} => $_->{target}}
+                   grep {$_ && $_->{short_type} eq 'image'}
+                   $self->relationships->@*;
+
+  # get titles and relationship ids of images found within the part contents
+  my %image;
+  my @drawings = $self->contents =~ m[<w:drawing>(.*?)</w:drawing>]g;
+  foreach my $drawing (@drawings) {
+    if ($drawing =~ m[<wp:docPr [^>]*? title="([^"]+)"/>
+                      .*?
+                      <a:blip \s+ r:embed="(\w+)"]x) {
+      my ($title, $rId)    = ($1, $2);
+      $image{$title} = "word/$rel_image{$rId}"
+                       # NOTE: targets in the rels XML miss the "word/" prefix, I don't know why.
+        or die "couldn't find image for relationship '$rId' associated with image '$title'";
+    }
+  }
+
+  return \%image;
+}
+
+
+
+
+#======================================================================
+# METHODS
+#======================================================================
+
+
+sub  _rels_xml {
+  my ($self, $new_xml) = @_;
+  my $rels_name = sprintf "word/_rels/%s.xml.rels", $self->part_name;
+  return $self->surgeon->xml_member($rels_name, $new_xml);
+}
+
+
+
+sub zip_member_name {
+  my $self = shift;
+  return sprintf "word/%s.xml", $self->part_name;
+}
+
+sub original_contents { # can also be called later, not only as lazy constructor
+  my $self = shift;
+
+  return $self->surgeon->xml_member($self->zip_member_name);
+}
+
+
+sub image {
+  my ($self, $title, $new_image_content) = @_;
+
+  # name of the image file within the zip
+  my $zip_member_name = $self->images->{$title}
+                     || ($title =~ /^\d+$/ ? "word/media/image$title.png"
+                                           : die "couldn't find image '$title'");
+
+  # delegate to Archive::Zip::contents
+  return $self->surgeon->zip->contents($zip_member_name, $new_image_content);
+}
+
 
 
 #======================================================================
@@ -266,8 +342,6 @@ sub merge_runs {
 
 
 
-
-
 sub unlink_fields {
   my $self = shift;
 
@@ -312,30 +386,44 @@ sub replace {
   return $xml;
 }
 
-#======================================================================
-# DELEGATION TO SUBCLASSES
-#======================================================================
 
-sub change {
+sub _update_contents_in_zip { # called for each part before saving the zip file
   my $self = shift;
 
-  my $change = MsOffice::Word::Surgeon::Change->new(rev_id => $self->{rev_id}++, @_);
-  return $change->as_xml;
+  $self->surgeon->xml_member($self->zip_member_name, $self->contents);
+}
+
+
+sub add_image {
+  my ($self, $image_PNG_content) = @_;
+
+  # compute a fresh image number and a fresh relationship id
+  my @image_members = $self->surgeon->zip->membersMatching(qr[^word/media/image]);
+  my @image_nums    = map {$_->fileName =~ /(\d+)/} @image_members;
+  my $last_img_num  = max @image_nums // 0;
+  my $target        = sprintf "media/image%d.png", $last_img_num + 1;
+  my $last_rId_num  = $self->relationships->$#*;
+  my $rId           = sprintf "rId%d", $last_rId_num + 1;
+
+  # assemble XML for the new relationship
+  my $type          = "http://schemas.openxmlformats.org/officeDocument/2006/relationships/image";
+  my $new_rel_xml   = qq{<Relationship Id="$rId" Type="$type" Target="$target"/>};
+
+  # update the rels member
+  my $xml = $self->_rels_xml;
+  $xml =~ s[</Relationships>][$new_rel_xml</Relationships>];
+  $self->_rels_xml($xml);
+
+  # add the image as a new member into the archive
+  my $member_name = "word/$target";
+  $self->surgeon->zip->addString(\$image_PNG_content, $member_name);
+
+  # return the relationship id
+  return $rId;
 }
 
 
 
-
-#======================================================================
-# BEFORE SAVING
-#======================================================================
-
-
-sub _update_contents_in_zip {
-  my $self = shift;
-
-  $self->surgeon->zip_member($self->zip_member_name, $self->contents);
-}
 
 
 1;
@@ -346,77 +434,314 @@ __END__
 
 =head1 NAME
 
-MsOffice::Word::Surgeon::PackagePart - TODO
+MsOffice::Word::Surgeon::PackagePart - Operations on a single part within the ZIP package of a docx document
 
 =head1 DESCRIPTION
 
-TODO
+This class is part of L<MsOffice::Word::Surgeon>; it encapsulates operations for a single
+I<package part> within the ZIP package of a C<.docx> document.
+It is mostly used for the I<document> part, that contains the XML representation of the
+main document body. However, other parts such as headers, footers, footnotes, etc. have the
+same internal representation and therefore the same operations can be invoked.
 
 
 =head1 METHODS
 
 =head2 new
 
-  my $run = MsOffice::Word::Surgeon::Run(
-    xml_before  => $xml_string,
-    props       => $properties_string,
-    inner_texts => [MsOffice::Word::Surgeon::Text(...), ...],
+  my $run = MsOffice::Word::Surgeon::PackagePart->new(
+    surgeon   => $surgeon,
+    part_name => $name,
   );
 
-Constructor for a new run object. Arguments are :
+Constructor for a new part object. This is called internally from
+L<MsOffice::Word::Surgeon>; it is not meant to be called directly
+by clients. 
+
+=head3 Constructor arguments
+
 
 =over
 
-=item xml_before
+=item surgeon
 
-A string containing arbitrary XML preceding that run in the complete document.
-The string may be empty but must be present.
+a weak reference to the main surgeon object 
 
-=item props
+=item part_name
 
-A string containing XML for the properties of this run (for example instructions
-for bold, italic, font, etc.). The module does not parse this information;
-it just compares the string for equality with the next run.
-
-
-=item inner_texts
-
-An array of L<MsOffice::Word::Surgeon::Text> objects, corresponding to the
-XML C<< <w:t> >> nodes inside the run.
+ZIP member name of this part
 
 =back
 
-=head2 as_xml
+=head3 Other attributes
 
-  my $xml = $run->as_xml;
+Other attributes, which are not passed through the constructor but are generated lazily on demand, are :
 
-Returns the XML representation of that run.
+=over
+
+=item contents
+
+the XML contents of this part
+
+=item runs
+
+a decomposition of the XML contents into a collection of
+L<MsOffice::Word::Surgeon::Run> objects.
+
+=item relationships
+
+an arrayref of Office relationships associated with this part. This information is stored
+in a C<.rels> member in the ZIP archive, named after the name of the package part.
+Array indices correspond to relationship numbers. Array values are hashrefs with
+keys
+
+=over
+
+=item rId
+
+the full relationship id
+
+=item num
+
+the numeric part of C<rId>
+
+=item type
+
+the full reference to the XML schema for this relationship
+
+=item short_type
+
+only the last word of the type, e.g. 'image', 'style', etc.
+
+=item target
+
+designation of the target within the ZIP file. The prefix 'word/' must be
+added for having a complete Zip member name.
+
+=back
+
+Currently the only purpose of this attribute is to deal with images; other types
+of relationships are ignored.
 
 
-=head2 merge
+=item images
 
-  $run->merge($next_run);
-
-Merge the contents of C<$next_run> together with the current run.
-This is only possible if both runs have the same properties (same
-string returned by the C<props> method), and if the next run has
-an empty C<xml_before> attribute; if the conditions are not met,
-an exception is raised.
+a hashref of images within this package part. Keys of the hash are image I<titles>, because
+this is the only information visible to MsWord users : when in Word, within the image formatting panel,
+the "properties" tab has a field for editing the image title. Images without title will not be 
+accessible through the current Perl module. Values of the hash are zip member names for the corresponding
+image representations in C<.png> format.
 
 
-=head2 replace
-
-  my $xml = $run->replace($pattern, $replacement_callback, %replacement_args);
-
-Replaces all occurrences of C<$pattern> within all text nodes by
-a new string computed by C<$replacement_callback>, and returns a new xml
-string corresponding to the result of all these replacements. This is the
-internal implementation for public method
-L<MsOffice::Word::Surgeon/replace>.
+=back
 
 
-=head2 remove_caps_property
+=head2 Contents restitution
 
-Searches in the run properties for a C<< <w:caps/> >> property;
-if found, removes it, and replaces all inner texts by their
-uppercase equivalents.
+=head3 contents
+
+Returns a Perl string with the current internal XML representation of the part
+contents.
+
+=head3 original_contents
+
+Returns a Perl string with the XML representation of the
+part contents, as it was in the ZIP archive before any
+modification.
+
+=head3 indented_contents
+
+Returns an indented version of the XML contents, suitable for inspection in a text editor.
+This is produced by L<XML::LibXML::Document/toString> and therefore is returned as an encoded
+byte string, not a Perl string.
+
+=head3 plain_text
+
+Returns the text contents of the part, without any markup.
+Paragraphs and breaks are converted to newlines, all other formatting instructions are ignored.
+
+
+=head3 runs
+
+Returns a list of L<MsOffice::Word::Surgeon::Run> objects. Each of
+these objects holds an XML fragment; joining all fragments
+restores the complete document.
+
+  my $contents = join "", map {$_->as_xml} $self->runs;
+
+
+=head2 Modifying contents
+
+
+=head3 cleanup_XML
+
+  $part->cleanup_XML;
+
+Apply several other methods for removing unnecessary nodes within the internal
+XML. This method successively calls L</reduce_all_noises>, L</unlink_fields>,
+L</suppress_bookmarks> and L</merge_runs>.
+
+
+=head3 reduce_noise
+
+  $part->reduce_noise($regex1, $regex2, ...);
+
+This method is used for removing unnecessary information in the XML
+markup.  It applies the given list of regexes to the whole document,
+suppressing matches.  The final result is put back into 
+C<< $self->contents >>. Regexes may be given either as C<< qr/.../ >>
+references, or as names of builtin regexes (described below).  Regexes
+are applied to the whole XML contents, not only to run nodes.
+
+
+=head3 noise_reduction_regex
+
+  my $regex = $part->noise_reduction_regex($regex_name);
+
+Returns the builtin regex corresponding to the given name.
+Known regexes are :
+
+  proof_checking       => qr(<w:(?:proofErr[^>]+|noProof/)>),
+  revision_ids         => qr(\sw:rsid\w+="[^"]+"),
+  complex_script_bold  => qr(<w:bCs/>),
+  page_breaks          => qr(<w:lastRenderedPageBreak/>),
+  language             => qr(<w:lang w:val="[^/>]+/>),
+  empty_run_props      => qr(<w:rPr></w:rPr>),
+  soft_hyphens         => qr(<w:softHyphen/>),
+
+=head3 reduce_all_noises
+
+  $part->reduce_all_noises;
+
+Applies all regexes from the previous method.
+
+=head3 unlink_fields
+
+  my $names_of_ASK_fields = $part->unlink_fields;
+
+Removes all fields from the part, just leaving the current
+value stored in each field. This is the equivalent of performing Ctrl-Shift-F9
+on the whole document.
+
+The return value is an arrayref to a  list of names of ASK fields within the document.
+Such names should then be passed to the L</suppress_bookmarks> method
+(see below).
+
+
+=head3 suppress_bookmarks
+
+  $part->suppress_bookmarks(@names_to_erase);
+
+Removes bookmarks markup in the part. This is useful because
+MsWord may silently insert bookmarks in unexpected places; therefore
+some searches within the text may fail because of such bookmarks.
+
+By default, this method only removes the bookmarks markup, leaving
+intact the contents of the bookmark. However, when the name of a
+bookmark belongs to the list C<< @names_to_erase >>, the contents
+is also removed. Currently this is used for suppressing ASK fields,
+because such fields contain a bookmark content that is never displayed by MsWord.
+
+
+
+=head3 merge_runs
+
+  $part->merge_runs(no_caps => 1); # optional arg
+
+Walks through all runs of text within the document, trying to merge
+adjacent runs when possible (i.e. when both runs have the same
+properties, and there is no other XML node inbetween).
+
+This operation is a prerequisite before performing replace operations, because
+documents edited in MsWord often have run boundaries across sentences or
+even in the middle of words; so regex searches can only be successful if those
+artificial boundaries have been removed.
+
+If the argument C<< no_caps => 1 >> is present, the merge operation
+will also convert runs with the C<w:caps> property, putting all letters
+into uppercase and removing the property; this makes more merges possible.
+
+
+=head3 replace
+
+  $part->replace($pattern, $replacement, %replacement_args);
+
+Replaces all occurrences of C<$pattern> regex within the text nodes by the
+given C<$replacement>. This is not exactly like a search-replace
+operation performed within MsWord, because the search does not cross boundaries
+of text nodes. In order to maximize the chances of successful replacements,
+the L</cleanup_XML> method is automatically called before starting the operation.
+
+The argument C<$pattern> can be either a string or a reference to a regular expression.
+It should not contain any capturing parentheses, because that would perturb text
+splitting operations.
+
+The argument C<$replacement> can be either a fixed string, or a reference to
+a callback subroutine that will be called for each match.
+
+
+The C<< %replacement_args >> hash can be used to pass information to the callback
+subroutine. That hash will be enriched with three entries :
+
+=over
+
+=item matched
+
+The string that has been matched by C<$pattern>.
+
+=item run
+
+The run object in which this text resides.
+
+=item xml_before
+
+The XML fragment (possibly empty) found before the matched text .
+
+=back
+
+The callback subroutine may return either plain text or structured XML.
+See L<MsOffice::Word::Surgeon::Run/SYNOPSIS> for an example of a replacement callback.
+
+The following special keys within C<< %replacement_args >> are interpreted by the 
+C<replace()> method itself, and therefore are not passed to the callback subroutine :
+
+=over
+
+=item keep_xml_as_is
+
+if true, no call is made to the L</cleanup_XML> method before performing the replacements
+
+=item dont_overwrite_contents
+
+if true, the internal XML contents is not modified in place; the new XML after performing
+replacements is merely returned to the caller.
+
+=back
+
+
+
+=head3 add_image
+
+  $part->add_image($image_PNG_content);
+
+Stores the given PNG image within the ZIP file, adds it as a relationship to the
+current part, and returns the relationship id. That id can then be referred from the 
+part contents to specify where the image should be displayed.
+
+
+
+
+
+=head1 AUTHOR
+
+Laurent Dami, E<lt>dami AT cpan DOT org<gt>
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2019-2022 by Laurent Dami.
+
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself.
+
+
+
