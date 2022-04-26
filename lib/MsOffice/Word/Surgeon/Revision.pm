@@ -1,4 +1,4 @@
-package MsOffice::Word::Surgeon::Change;
+package MsOffice::Word::Surgeon::Revision;
 use Moose;
 use MooseX::StrictConstructor;
 use Moose::Util::TypeConstraints;
@@ -27,7 +27,7 @@ sub BUILD {
   my $self = shift;
 
   $self->to_delete || $self->to_insert
-    or croak "attempt to create a Change object without 'to_delete' nor 'to_insert' args";
+    or croak "attempt to create a Revision object without 'to_delete' nor 'to_insert' args";
 }
 
 
@@ -71,12 +71,12 @@ __END__
 
 =head1 NAME
 
-MsOffice::Word::Surgeon::Change - generate XML markup for MsWord tracked changes
+MsOffice::Word::Surgeon::Revision - generate XML markup for MsWord revisions
 
 =head1 DESCRIPTION
 
 This class implements the XML markup generation algorithm
-for the method L<MsOffice::Word::Surgeon/change> .
+for the method L<MsOffice::Word::Surgeon/revision> .
 See that method for a description of the API.
 
 =head1 INTERNALS

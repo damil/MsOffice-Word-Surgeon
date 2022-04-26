@@ -7,7 +7,7 @@ use Encode                                qw(encode_utf8 decode_utf8);
 use Carp                                  qw(croak);
 use MsOffice::Word::Surgeon::Run;
 use MsOffice::Word::Surgeon::Text;
-use MsOffice::Word::Surgeon::Change;
+use MsOffice::Word::Surgeon::Revision;
 use MsOffice::Word::Surgeon::PackagePart;
 
 use namespace::clean -except => 'meta';
@@ -30,7 +30,7 @@ has 'document'      => (is => 'ro', isa => 'MsOffice::Word::Surgeon::PackagePart
 
 
 has 'next_rev_id'   => (is => 'bare', isa => 'Num', default => 1, init_arg => undef);
-   # used by the PackagePart::change() method for creating *::Change objects -- each instance
+   # used by the PackagePart::revision() method for creating *::Revision objects -- each instance
    # gets a fresh value
 
 
@@ -187,11 +187,11 @@ sub save_as {
 # DELEGATION TO OTHER CLASSES
 #======================================================================
 
-sub change {
+sub revision {
   my $self = shift;
 
-  my $change = MsOffice::Word::Surgeon::Change->new(rev_id => $self->surgeon->new_rev_id, @_);
-  return $change->as_xml;
+  my $revision = MsOffice::Word::Surgeon::Revision->new(rev_id => $self->surgeon->new_rev_id, @_);
+  return $revision->as_xml;
 }
 
 
@@ -218,7 +218,7 @@ MsOffice::Word::Surgeon - tamper wit the guts of Microsoft docx documents
   my $pattern = join "|", keys %alias;
   my $replacement_callback = sub {
     my %args =  @_;
-    my $replacement = $surgeon->change(to_delete  => $args{matched},
+    my $replacement = $surgeon->revision(to_delete  => $args{matched},
                                        to_insert  => $alias{$args{matched}},
                                        run        => $args{run},
                                        xml_before => $args{xml_before},
@@ -380,9 +380,9 @@ Writes the ZIP archive into the given file.
 
 Writes the updated ZIP archive into the initial file.
 
-=head3 change
+=head3 revision
 
-  my $xml = $surgeon->change(
+  my $xml = $surgeon->revision(
     to_delete   => $text_to_delete,
     to_insert   => $text_to_insert,
     author      => $author_string,
@@ -392,12 +392,12 @@ Writes the updated ZIP archive into the initial file.
   );
 
 This method is syntactic sugar for using the
-L<MsOffice::Word::Surgeon::Change> class.
-It generates markup for MsWord tracked changes. Users can
-then manually review those changes within MsWord and accept or reject
+L<MsOffice::Word::Surgeon::Revision> class.
+It generates markup for MsWord revisions (a.k.a. "tracked changes"). Users can
+then manually review those revisions within MsWord and accept or reject
 them. This is best used in collaboration with the L</replace> method :
-the replacement callback can call C<< $self->change(...) >> to
-generate tracked change marks in the document.
+the replacement callback can call C<< $self->revision(...) >> to
+generate revision marks in the document.
 
 Either C<to_delete> or C<to_insert> (or both) must
 be present. Other parameters are optional. The parameters are :
@@ -415,18 +415,18 @@ The string of new text to insert.
 
 =item author
 
-A short string that will be displayed by MsWord as the "author" of this tracked change.
+A short string that will be displayed by MsWord as the "author" of this revision.
 
 =item date
 
 A date (and optional time) in ISO format that will be displayed by
-MsWord as the date of this tracked change. The current date and time
+MsWord as the date of this revision. The current date and time
 will be used by default.
 
 =item run
 
 A reference to the L<MsOffice::Word::Surgeon::Run> object surrounding
-this tracked change. The formatting properties of that run will be
+this revision. The formatting properties of that run will be
 copied into the C<< <w:r> >> nodes of the deleted and inserted text fragments.
 
 
@@ -438,7 +438,7 @@ of the inserted text
 =back
 
 This method delegates to the
-L<MsOffice::Word::Surgeon::Change> class for generating the
+L<MsOffice::Word::Surgeon::Revision> class for generating the
 XML markup.
 
 
