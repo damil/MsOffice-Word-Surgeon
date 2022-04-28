@@ -3,10 +3,12 @@ use feature 'state';
 use Moose;
 use MooseX::StrictConstructor;
 use MsOffice::Word::Surgeon::Utils qw(maybe_preserve_spaces is_at_run_level);
+use MsOffice::Word::Surgeon::Run;
+use MsOffice::Word::Surgeon::Text;
 use XML::LibXML;
 use List::Util                     qw(max);
 use Carp                           qw(croak);
-use Encode                         qw(encode_utf8 decode_utf8);
+
 
 # constant integers to specify indentation modes -- see L<XML::LibXML>
 use constant XML_NO_INDENT     => 0;
@@ -16,23 +18,17 @@ use namespace::clean -except => 'meta';
 
 our $VERSION = '1.08';
 
+# attributes passed to the constructor
+has 'surgeon'            => (is => 'ro', isa => 'MsOffice::Word::Surgeon', required => 1, weak_ref => 1);
+has 'part_name'          => (is => 'ro', isa => 'Str',                     required => 1);
 
-has 'surgeon'       => (is => 'ro', isa => 'MsOffice::Word::Surgeon', required => 1, weak_ref => 1);
 
-has 'part_name'     => (is => 'ro', isa => 'Str',                     required => 1);
-
-has 'contents'      => (is => 'rw', isa => 'Str',          init_arg => undef,
-                        builder => 'original_contents', lazy => 1,
-                        trigger => sub {shift->clear_runs});
-
-has 'runs'          => (is => 'ro', isa => 'ArrayRef',     init_arg => undef,
-                        builder => '_runs', lazy => 1, clearer => 'clear_runs');
-
-has 'relationships' => (is => 'ro', isa => 'ArrayRef',     init_arg => undef,
-                         builder => '_relationships', lazy => 1);
-
-has 'images'        => (is => 'ro', isa => 'HashRef',      init_arg => undef,
-                        builder => '_images', lazy => 1);
+# attributes constructed by the module -- not received through the constructor
+sub has_lazy ($@) {my $attr = shift; has($attr => @_, init_arg => undef, lazy => 1, builder => "_$attr")}
+has_lazy 'contents'      => (is => 'rw', isa => 'Str',      trigger => sub {shift->clear_runs});
+has_lazy 'runs'          => (is => 'ro', isa => 'ArrayRef', clearer => 'clear_runs');
+has_lazy 'relationships' => (is => 'ro', isa => 'ArrayRef');
+has_lazy 'images'        => (is => 'ro', isa => 'HashRef');
 
 
 
@@ -42,17 +38,17 @@ has 'images'        => (is => 'ro', isa => 'HashRef',      init_arg => undef,
 
 # Various regexes for removing uninteresting XML information
 my %noise_reduction_regexes = (
-  proof_checking        => qr(<w:(?:proofErr[^>]+|noProof/)>),
-  revision_ids          => qr(\sw:rsid\w+="[^"]+"),
-  complex_script_bold   => qr(<w:bCs/>),
-  page_breaks           => qr(<w:lastRenderedPageBreak/>),
-  language              => qr(<w:lang w:val="[^/>]+/>),
-  empty_run_props       => qr(<w:rPr></w:rPr>),
-  soft_hyphens          => qr(<w:softHyphen/>),
+  proof_checking         => qr(<w:(?:proofErr[^>]+|noProof/)>),
+  revision_ids           => qr(\sw:rsid\w+="[^"]+"),
+  complex_script_bold    => qr(<w:bCs/>),
+  page_breaks            => qr(<w:lastRenderedPageBreak/>),
+  language               => qr(<w:lang w:val="[^/>]+/>),
+  empty_run_props        => qr(<w:rPr></w:rPr>),
+  soft_hyphens           => qr(<w:softHyphen/>),
  );
 
 my @noise_reduction_list = qw/proof_checking revision_ids
-                              complex_script_bold page_breaks language 
+                              complex_script_bold page_breaks language
                               empty_run_props soft_hyphens/;
 
 #======================================================================
@@ -162,6 +158,8 @@ sub _images {
 }
 
 
+sub _contents {shift->original_contents}
+
 
 
 #======================================================================
@@ -182,7 +180,7 @@ sub zip_member_name {
   return sprintf "word/%s.xml", $self->part_name;
 }
 
-sub original_contents { # can also be called later, not only as lazy constructor
+sub original_contents {
   my $self = shift;
 
   return $self->surgeon->xml_member($self->zip_member_name);
@@ -360,6 +358,7 @@ sub unlink_fields {
                                       ]x;   # field boundaries are encoded as  "begin" / "separate" / "end"
   state $simple_field_rx          = qr[</?w:fldSimple[^>]*>];
 
+  # apply the regexes
   $self->reduce_noise($field_instruction_txt_rx, $field_boundary_rx, $simple_field_rx);
 
   return \@names_of_ASK_fields;
@@ -373,7 +372,7 @@ sub replace {
   my $keep_xml_as_is = delete $replacement_args{keep_xml_as_is};
   $self->cleanup_XML unless $keep_xml_as_is;
 
-  # special option to avoid modying contents
+  # check for presences of a special option to avoid modying contents
   my $dont_overwrite_contents = delete $replacement_args{dont_overwrite_contents};
 
   # apply replacements and generate new XML
@@ -381,6 +380,7 @@ sub replace {
     $_->replace($pattern, $replacement_callback, %replacement_args)
   }  @{$self->runs};
 
+  # overwrite previous contents
   $self->contents($xml) unless $dont_overwrite_contents;
 
   return $xml;
@@ -392,6 +392,16 @@ sub _update_contents_in_zip { # called for each part before saving the zip file
 
   $self->surgeon->xml_member($self->zip_member_name, $self->contents);
 }
+
+
+sub replace_image {
+  my ($self, $image_title, $image_PNG_content) = @_;
+
+  my $member_name = $self->images->{$image_title}
+    or die "could not find an image with title: $image_title";
+  $self->surgeon->zip->contents($member_name, $image_PNG_content);
+}
+
 
 
 sub add_image {

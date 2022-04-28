@@ -5,8 +5,6 @@ use MooseX::StrictConstructor;
 use Archive::Zip                          qw(AZ_OK);
 use Encode                                qw(encode_utf8 decode_utf8);
 use Carp                                  qw(croak);
-use MsOffice::Word::Surgeon::Run;
-use MsOffice::Word::Surgeon::Text;
 use MsOffice::Word::Surgeon::Revision;
 use MsOffice::Word::Surgeon::PackagePart;
 
@@ -14,21 +12,17 @@ use namespace::clean -except => 'meta';
 
 our $VERSION = '1.08';
 
+# public attributes
 has 'docx'          => (is => 'ro', isa => 'Str', required => 1);
 
-has 'zip'           => (is => 'ro', isa => 'Archive::Zip', init_arg => undef,
-                        builder => '_zip',   lazy => 1);
+# attributes constructed by the module -- not received through the constructor
+sub has_lazy ($@) {my $attr = shift; has($attr => @_, init_arg => undef, lazy => 1, builder => "_$attr")}
+has_lazy 'zip'      => (is => 'ro', isa => 'Archive::Zip');
+has_lazy 'parts'    => (is => 'ro', isa => 'HashRef[MsOffice::Word::Surgeon::PackagePart]');
+has_lazy 'document' => (is => 'ro', isa => 'MsOffice::Word::Surgeon::PackagePart',
+                        handles => [qw/contents original_contents indented_contents plain_text replace/]);
 
-has 'parts'         => (is => 'ro', isa => 'HashRef[MsOffice::Word::Surgeon::PackagePart]', init_arg => undef,
-                        builder => '_parts', lazy => 1);
-
-has 'document'      => (is => 'ro', isa => 'MsOffice::Word::Surgeon::PackagePart', init_arg => undef,
-                        builder => '_document', lazy => 1,
-                        handles => [qw/contents original_contents indented_contents plain_text replace/]
-                       );
-
-
-
+# bare attributes -- just internal storage
 has 'next_rev_id'   => (is => 'bare', isa => 'Num', default => 1, init_arg => undef);
    # used by the PackagePart::revision() method for creating *::Revision objects -- each instance
    # gets a fresh value
@@ -344,20 +338,12 @@ Returns the ordered list of names of footer members stored in the ZIP file.
 
 =head2 Other methods
 
+
 =head3 part
 
   my $part = $surgeon->part($part_name);
 
 Returns the L<MsOffice::Word::Surgeon::PackagePart> object corresponding to the given part name.
-
-
-=head3 xml_member
-
-  my $xml = $surgeon->xml_member($member_name);
-  # or
-  $surgeon->xml_member($member_name, $new_xml);
-
-Reads or writes the given member name in the ZIP file, with appropriate utf8 decoding or encoding.
 
 
 =head3 all_parts_do
@@ -366,6 +352,16 @@ Reads or writes the given member name in the ZIP file, with appropriate utf8 dec
 
 Calls the given method on all part objects. Results are accumulated
 in a hash, with part names as keys to the results.
+
+
+=head3 xml_member
+
+  my $xml = $surgeon->xml_member($member_name);
+  # or
+  $surgeon->xml_member($member_name, $new_xml);
+
+Reads or writes the given member name in the ZIP file, with utf8 decoding or encoding.
+
 
 =head3 save_as
 
@@ -380,6 +376,7 @@ Writes the ZIP archive into the given file.
 
 Writes the updated ZIP archive into the initial file.
 
+
 =head3 revision
 
   my $xml = $surgeon->revision(
@@ -391,7 +388,7 @@ Writes the updated ZIP archive into the initial file.
     xml_before  => $xml_string,
   );
 
-This method is syntactic sugar for using the
+This method is syntactic sugar for instantiating the
 L<MsOffice::Word::Surgeon::Revision> class.
 It generates markup for MsWord revisions (a.k.a. "tracked changes"). Users can
 then manually review those revisions within MsWord and accept or reject
