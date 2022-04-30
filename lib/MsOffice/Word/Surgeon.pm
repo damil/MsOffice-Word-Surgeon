@@ -27,7 +27,9 @@ has      'docx'      => (is => 'ro', isa => 'Str');
 has_lazy 'zip'       => (is => 'ro', isa => 'Archive::Zip');
 
 # inner attributes lazily constructed by the module
-has_inner 'parts'    => (is => 'ro', isa => 'HashRef[MsOffice::Word::Surgeon::PackagePart]');
+has_inner 'parts'    => (is => 'ro', isa => 'HashRef[MsOffice::Word::Surgeon::PackagePart]',
+                         traits => ['Hash'], handles => {part => 'get'});
+
 has_inner 'document' => (is => 'ro', isa => 'MsOffice::Word::Surgeon::PackagePart',
                         handles => [qw/contents original_contents indented_contents plain_text replace/]);
   # Note: this attribute is equivalent to $self->part('document'); made into an attribute
@@ -113,7 +115,7 @@ sub _document {shift->part('document')}
 
 
 #======================================================================
-# METHODS
+# ACCESSING OR CHANGING THE INTERNAL STATE
 #======================================================================
 
 sub xml_member {
@@ -128,13 +130,6 @@ sub xml_member {
     my $bytes = encode_utf8($new_content);
     return $self->zip->contents($member_name, $bytes);
   }
-}
-
-sub part {
-  my ($self, $part_name) = @_;
-  my $part = $self->parts->{$part_name}
-    or croak "this document has no part named : $part_name";
-  return $part;
 }
 
 sub _content_types {
@@ -161,7 +156,7 @@ sub new_rev_id {
 
 
 #======================================================================
-# METHODS PROPAGATED TO ALL PARTS
+# GENERIC PROPAGATION TO ALL PARTS
 #======================================================================
 
 

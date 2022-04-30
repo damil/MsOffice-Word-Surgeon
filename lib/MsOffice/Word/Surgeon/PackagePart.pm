@@ -376,9 +376,6 @@ sub unlink_fields {
 sub replace {
   my ($self, $pattern, $replacement_callback, %replacement_args) = @_;
 
-warn "replace ", $self->part_name, "\n";
-  $DB::single = 1 if $self->part_name eq 'document';
-
   # cleanup the XML structure so that replacements work better
   my $keep_xml_as_is = delete $replacement_args{keep_xml_as_is};
   $self->cleanup_XML unless $keep_xml_as_is;
