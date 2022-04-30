@@ -10,6 +10,10 @@ use List::Util                     qw(max);
 use Carp                           qw(croak);
 
 
+# syntactic sugar for attributes
+sub has_inner ($@) {my $attr = shift; has($attr => @_, lazy => 1, builder => "_$attr", init_arg => undef)}
+
+
 # constant integers to specify indentation modes -- see L<XML::LibXML>
 use constant XML_NO_INDENT     => 0;
 use constant XML_SIMPLE_INDENT => 1;
@@ -19,16 +23,15 @@ use namespace::clean -except => 'meta';
 our $VERSION = '1.08';
 
 # attributes passed to the constructor
-has 'surgeon'              => (is => 'ro', isa => 'MsOffice::Word::Surgeon', required => 1, weak_ref => 1);
-has 'part_name'            => (is => 'ro', isa => 'Str',                     required => 1);
+has       'surgeon'        => (is => 'ro', isa => 'MsOffice::Word::Surgeon', required => 1, weak_ref => 1);
+has       'part_name'      => (is => 'ro', isa => 'Str',                     required => 1);
 
 
 # attributes constructed by the module -- not received through the constructor
-sub has_lazy ($@) {my $attr = shift; has($attr => @_, init_arg => undef, lazy => 1, builder => "_$attr")}
-has_lazy 'contents'        => (is => 'rw', isa => 'Str',      trigger => \&on_new_contents);
-has_lazy 'runs'            => (is => 'ro', isa => 'ArrayRef', clearer => 'clear_runs');
-has_lazy 'relationships'   => (is => 'ro', isa => 'ArrayRef');
-has_lazy 'images'          => (is => 'ro', isa => 'HashRef');
+has_inner 'contents'       => (is => 'rw', isa => 'Str',      trigger => \&_on_new_contents);
+has_inner 'runs'           => (is => 'ro', isa => 'ArrayRef', clearer => 'clear_runs');
+has_inner 'relationships'  => (is => 'ro', isa => 'ArrayRef');
+has_inner 'images'         => (is => 'ro', isa => 'HashRef');
 
 has 'contents_has_changed' => (is => 'bare', isa => 'Bool', default => 0);
 
@@ -163,7 +166,7 @@ sub _images {
 
 sub _contents {shift->original_contents}
 
-sub on_new_contents {
+sub _on_new_contents {
   my $self = shift;
 
   $self->clear_runs;
@@ -182,11 +185,11 @@ sub  _rels_xml {
 }
 
 
-
 sub zip_member_name {
   my $self = shift;
   return sprintf "word/%s.xml", $self->part_name;
 }
+
 
 sub original_contents {
   my $self = shift;
@@ -448,9 +451,6 @@ sub add_image {
   # return the relationship id
   return $rId;
 }
-
-
-
 
 
 1;
