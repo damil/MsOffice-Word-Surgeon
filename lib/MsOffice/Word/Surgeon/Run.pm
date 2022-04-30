@@ -7,12 +7,21 @@ use Carp                           qw(croak);
 
 use namespace::clean -except => 'meta';
 
+our $VERSION = '1.08';
+
+#======================================================================
+# ATTRIBUTES
+#======================================================================
+
 has 'xml_before'  => (is => 'ro', isa => 'Str', required => 1);
 has 'props'       => (is => 'ro', isa => 'Str', required => 1);
 has 'inner_texts' => (is => 'ro', required => 1,
                       isa => 'ArrayRef[MsOffice::Word::Surgeon::Text]');
 
-our $VERSION = '1.08';
+#======================================================================
+# METHODS
+#======================================================================
+
 
 sub as_xml {
   my $self = shift;
@@ -194,3 +203,15 @@ L<MsOffice::Word::Surgeon/replace>.
 Searches in the run properties for a C<< <w:caps/> >> property;
 if found, removes it, and replaces all inner texts by their
 uppercase equivalents.
+
+
+=head1 AUTHOR
+
+Laurent Dami, E<lt>dami AT cpan DOT org<gt>
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 2019-2022 by Laurent Dami.
+
+This library is free software; you can redistribute it and/or modify
+it under the same terms as Perl itself.

@@ -76,7 +76,7 @@ MsOffice::Word::Surgeon::Revision - generate XML markup for MsWord revisions
 =head1 DESCRIPTION
 
 This class implements the XML markup generation algorithm
-for the method L<MsOffice::Word::Surgeon/revision> .
+for the method L<MsOffice::Word::Surgeon/new_revision>.
 See that method for a description of the API.
 
 =head1 INTERNALS
@@ -84,6 +84,6 @@ See that method for a description of the API.
 The constructor requires an integer C<rev_id> argument.
 The C<rev_id> is fed by the surgeon object which generates a fresh value at each call.
 This is inserted as C<w:id> attribute to the
-C<< <w:del> >> and C<< <w:ins> >> nodes -- but it doesn't seem to be used for
-any purpose by MsWord.
+C<< <w:del> >> and C<< <w:ins> >> nodes -- but I don't really know why, 
+since it doesn't seem to be used for any purpose by MsWord.
 

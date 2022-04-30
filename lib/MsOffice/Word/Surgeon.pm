@@ -1,5 +1,5 @@
 package MsOffice::Word::Surgeon;
-use 5.10.0;
+use 5.22.0;
 use Moose;
 use MooseX::StrictConstructor;
 use Archive::Zip                          qw(AZ_OK);
@@ -8,29 +8,39 @@ use Carp                                  qw(croak);
 use MsOffice::Word::Surgeon::Revision;
 use MsOffice::Word::Surgeon::PackagePart;
 
+# syntactic sugar for attributes
+sub has_lazy  ($@) {my $attr = shift; has($attr => @_, lazy => 1, builder => "_$attr")}
+sub has_inner ($@) {my $attr = shift; has_lazy($attr => @_, init_arg => undef)}
+
+
 use namespace::clean -except => 'meta';
 
 our $VERSION = '1.08';
 
-# public attributes
-has 'docx'          => (is => 'ro', isa => 'Str', required => 1);
 
-# attributes constructed by the module -- not received through the constructor
-sub has_lazy ($@) {my $attr = shift; has($attr => @_, init_arg => undef, lazy => 1, builder => "_$attr")}
-has_lazy 'zip'      => (is => 'ro', isa => 'Archive::Zip');
-has_lazy 'parts'    => (is => 'ro', isa => 'HashRef[MsOffice::Word::Surgeon::PackagePart]');
-has_lazy 'document' => (is => 'ro', isa => 'MsOffice::Word::Surgeon::PackagePart',
+#======================================================================
+# ATTRIBUTES
+#======================================================================
+
+# attributes to the constructor -- either the filename or an existing zip archive
+has      'docx'      => (is => 'ro', isa => 'Str');
+has_lazy 'zip'       => (is => 'ro', isa => 'Archive::Zip');
+
+# inner attributes lazily constructed by the module
+has_inner 'parts'    => (is => 'ro', isa => 'HashRef[MsOffice::Word::Surgeon::PackagePart]');
+has_inner 'document' => (is => 'ro', isa => 'MsOffice::Word::Surgeon::PackagePart',
                         handles => [qw/contents original_contents indented_contents plain_text replace/]);
+  # Note: this attribute is equivalent to $self->part('document'); made into an attribute
+  # for convenience and for automatic delegation of methods through the 'handles' declaration
 
-# bare attributes -- just internal storage
-has 'next_rev_id'   => (is => 'bare', isa => 'Num', default => 1, init_arg => undef);
-   # used by the PackagePart::revision() method for creating *::Revision objects -- each instance
+# just a slot for internal storage
+has 'next_rev_id'    => (is => 'bare', isa => 'Num', default => 1, init_arg => undef);
+   # used by the revision() method for creating *::Revision objects -- each instance
    # gets a fresh value
 
 
-
 #======================================================================
-# BUILDING
+# BUILDING INSTANCES
 #======================================================================
 
 
@@ -48,6 +58,18 @@ around BUILDARGS => sub {
 };
 
 
+# make sure that the constructor got either a 'docx' or a 'zip' attribute
+sub BUILD {
+  my $self = shift;
+
+  my $class = ref $self;
+
+  $self->{docx} || $self->{zip}
+    or croak "$class->new() : need either 'docx' or 'zip' attribute";
+  not ($self->{docx} && $self->{zip})
+    or croak "$class->new() : can't have both 'docx' and 'zip' attributes";
+}
+
 
 #======================================================================
 # LAZY ATTRIBUTE CONSTRUCTORS
@@ -58,28 +80,32 @@ sub _zip {
 
   my $zip = Archive::Zip->new;
   $zip->read($self->{docx}) == AZ_OK
-      or die "cannot unzip $self->{docx}";
+      or croak "cannot unzip $self->{docx}";
 
   return $zip;
 }
 
 
+
 sub _parts {
   my $self = shift;
 
-  my $xml     = $self->_content_types;
+  # first create a package part for the main document
+  my $doc = MsOffice::Word::Surgeon::PackagePart->new(surgeon   => $self,
+                                                      part_name => 'document');
 
-  my @headers = $xml =~ m[PartName="/word/(header\d+).xml"]g;
-  my @footers = $xml =~ m[PartName="/word/(footer\d+).xml"]g;
+  # gather names of headers and footers related to that document
+  my @headers_footers = map  {$_->{target} =~ s/\.xml$//r}
+                        grep {$_ && $_->{short_type} =~ /^(header|footer)$/}
+                        $doc->relationships->@*;
 
-  my %parts = map {$_ => MsOffice::Word::Surgeon::PackagePart->new(surgeon   => $self,
-                                                                   part_name => $_)}
-                  ('document', @headers, @footers);
+  # create package parts for headers and footers and assemble all parts into a hash
+  my %parts = (document => $doc);
+  $parts{$_} = MsOffice::Word::Surgeon::PackagePart->new(surgeon   => $self,
+                                                         part_name => $_)
+    for @headers_footers;
 
   return \%parts;
-
-  # THINK : headers and footers are also listed in word/_rels/document.xml.rels
-  # Should we take this source instead of '[Content_Types].xml' ?
 }
 
 
@@ -87,37 +113,33 @@ sub _document {shift->part('document')}
 
 
 #======================================================================
-# methods
+# METHODS
 #======================================================================
-
-sub _content_types {
-  my ($self, $new_content_types) = @_;
-  return $self->xml_member('[Content_Types].xml', $new_content_types);
-}
-
-
-
-sub part {
-  my ($self, $part_name) = @_;
-  my $part = $self->parts->{$part_name}
-    or die "no such part : $part_name";
-  return $part;
-}
-
-
 
 sub xml_member {
   my ($self, $member_name, $new_content) = @_;
 
-  if (! defined $new_content) {
+  if (! defined $new_content) {  # used as a reader
     my $bytes = $self->zip->contents($member_name)
-      or die "no zip member for $member_name";
+      or croak "no zip member for $member_name";
     return decode_utf8($bytes);
   }
-  else {
+  else {                         # used as a writer
     my $bytes = encode_utf8($new_content);
     return $self->zip->contents($member_name, $bytes);
   }
+}
+
+sub part {
+  my ($self, $part_name) = @_;
+  my $part = $self->parts->{$part_name}
+    or croak "this document has no part named : $part_name";
+  return $part;
+}
+
+sub _content_types {
+  my ($self, $new_content_types) = @_;
+  return $self->xml_member('[Content_Types].xml', $new_content_types);
 }
 
 
@@ -148,13 +170,38 @@ sub all_parts_do {
 
   my $parts = $self->parts;
 
+  # apply the method to each package part
   my %result;
+  $result{$_} = $parts->{$_}->$method_name(@args) foreach keys %$parts;
 
-  $result{$_} = $parts->{$_}->$method_name(@args) for keys %$parts;
+
   return \%result;
 }
 
 
+#======================================================================
+# CLONING
+#======================================================================
+
+sub clone {
+  my $self = shift;
+
+  # create a new Zip archive and copy all members to it
+  my $new_zip = Archive::Zip->new;
+  foreach my $member ($self->zip->members) {
+    $new_zip->addMember($member);
+  }
+
+  # create a new instance of this class
+  my $class = ref $self;
+  my $clone = $class->new(zip => $new_zip);
+
+  # other attributes will be recreated lazily within the clone .. not
+  # the most efficient way, but it is easier and safer, otherwise there is
+  # a risk of mixed references
+
+  return $clone;
+}
 
 #======================================================================
 # SAVING THE FILE
@@ -165,7 +212,8 @@ sub overwrite {
   my $self = shift;
 
   $_->_update_contents_in_zip foreach values $self->parts->%*;
-  $self->zip->overwrite;
+  $self->zip->overwrite == AZ_OK
+    or croak "error overwriting zip archive " . $self->docx;
 }
 
 sub save_as {
@@ -173,7 +221,7 @@ sub save_as {
 
   $_->_update_contents_in_zip foreach values $self->parts->%*;
   $self->zip->writeToFileNamed($docx) == AZ_OK
-    or die "error writing zip archive to $docx";
+    or croak "error writing zip archive to $docx";
 }
 
 
@@ -181,13 +229,12 @@ sub save_as {
 # DELEGATION TO OTHER CLASSES
 #======================================================================
 
-sub revision {
+sub new_revision {
   my $self = shift;
 
-  my $revision = MsOffice::Word::Surgeon::Revision->new(rev_id => $self->surgeon->new_rev_id, @_);
+  my $revision = MsOffice::Word::Surgeon::Revision->new(rev_id => $self->new_rev_id, @_);
   return $revision->as_xml;
 }
-
 
 
 1;
@@ -198,7 +245,7 @@ __END__
 
 =head1 NAME
 
-MsOffice::Word::Surgeon - tamper wit the guts of Microsoft docx documents
+MsOffice::Word::Surgeon - tamper with the guts of Microsoft docx documents, with regexes
 
 =head1 SYNOPSIS
 
@@ -212,11 +259,11 @@ MsOffice::Word::Surgeon - tamper wit the guts of Microsoft docx documents
   my $pattern = join "|", keys %alias;
   my $replacement_callback = sub {
     my %args =  @_;
-    my $replacement = $surgeon->revision(to_delete  => $args{matched},
-                                       to_insert  => $alias{$args{matched}},
-                                       run        => $args{run},
-                                       xml_before => $args{xml_before},
-                                      );
+    my $replacement = $surgeon->new_revision(to_delete  => $args{matched},
+                                             to_insert  => $alias{$args{matched}},
+                                             run        => $args{run},
+                                             xml_before => $args{xml_before},
+                                            );
     return $replacement;
   };
   $surgeon->document->replace(qr[$pattern], $replacement_callback);
@@ -233,7 +280,9 @@ This module supports a few operations for modifying or extracting text
 from Microsoft Word documents in '.docx' format -- therefore the name
 'surgeon'. Since a surgeon does not give life, there is no support for
 creating fresh documents; if you have such needs, use one of the other
-packages listed in the L<SEE ALSO> section.
+packages listed in the L<SEE ALSO> section. To my knowledge, this is the
+only solution (even in other languages) for applying regular expressions
+to the contents of Word documents.
 
 Some applications for this module are :
 
@@ -312,13 +361,18 @@ Instance of L<Archive::Zip> associated with this file
 
 =head3 parts
 
-Hashref to L<MsOffice::Word::Surgeon::PackagePart> objects, keyed by their partname in the ZIP file.
+Hashref to L<MsOffice::Word::Surgeon::PackagePart> objects, keyed by their part name in the ZIP file.
+There is always a C<'document'> part. Currently, other optional parts may be headers and footers.
+Future versions may include other parts like footnotes or endnotes.
 
 =head3 document
 
 Shortcut to C<< $surgeon->part('document') >> -- the 
 L<MsOffice::Word::Surgeon::PackagePart> object corresponding to the main document.
 See the C<PackagePart> documentation for operations on part objects.
+Besides, the following operations are supported directly as methods to the C<< $surgeon >> object
+and are automatically delegated to the C<< document >> part :
+C<contents>, C<original_contents>, C<indented_contents>, C<plain_text>, C<replace>.
 
 
 
@@ -377,9 +431,9 @@ Writes the ZIP archive into the given file.
 Writes the updated ZIP archive into the initial file.
 
 
-=head3 revision
+=head3 new_revision
 
-  my $xml = $surgeon->revision(
+  my $xml = $surgeon->new_revision(
     to_delete   => $text_to_delete,
     to_insert   => $text_to_insert,
     author      => $author_string,
@@ -389,11 +443,12 @@ Writes the updated ZIP archive into the initial file.
   );
 
 This method is syntactic sugar for instantiating the
-L<MsOffice::Word::Surgeon::Revision> class.
-It generates markup for MsWord revisions (a.k.a. "tracked changes"). Users can
+L<MsOffice::Word::Surgeon::Revision> class and returning 
+XML markup for MsWord revisions (a.k.a. "tracked changes")
+generated by that class. Users can
 then manually review those revisions within MsWord and accept or reject
 them. This is best used in collaboration with the L</replace> method :
-the replacement callback can call C<< $self->revision(...) >> to
+the replacement callback can call C<< $self->new_revision(...) >> to
 generate revision marks in the document.
 
 Either C<to_delete> or C<to_insert> (or both) must
@@ -433,11 +488,6 @@ An optional XML fragment to be inserted before the C<< <w:t> >> node
 of the inserted text
 
 =back
-
-This method delegates to the
-L<MsOffice::Word::Surgeon::Revision> class for generating the
-XML markup.
-
 
 
 =head1 SEE ALSO
@@ -486,7 +536,7 @@ A Python library, documented at L<https://python-docx.readthedocs.io/en/latest/>
 
 As far as I can tell, most of these libraries provide objects and methods that
 closely reflect the complete XML structure : for example they have classes for
-paragraphes, styles, fonts, inline shapes, etc.
+paragraphs, styles, fonts, inline shapes, etc.
 
 The present module is much simpler but also much more limited : it was optimised
 for dealing with the text contents and offers no support for presentation or

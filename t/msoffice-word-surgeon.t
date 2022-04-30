@@ -57,16 +57,14 @@ is_deeply [$surgeon->headers], [qw/header1 header2 header3/],     "headers";
 is_deeply [$surgeon->footers], [qw/footer1 footer2 footer3/],     "footers";
 
 
-#$surgeon->all_parts_do(replace => qr/\bPage\b/ => sub {"Pagina"});
-
-# $surgeon->part($_)->replace(qr/\bPage\b/ => sub {"Pagina"}, keep_xml_as_is => 1) for $surgeon->headers;
+$surgeon->all_parts_do(replace => qr/\bSurgeon\b/ => sub {"Physician"});
 
 
-use Path::Tiny;
-my $img = path("d:/temp/foo.png")->slurp_raw;
-my $rId = $surgeon->document->add_image($img);
-warn "created rId $rId\n";
 
+# use Path::Tiny;
+# my $img = path("d:/temp/foo.png")->slurp_raw;
+# my $rId = $surgeon->document->add_image($img);
+# warn "created rId $rId\n";
 
 
 $surgeon->save_as("surgeon_result.docx")  if $do_save_results;

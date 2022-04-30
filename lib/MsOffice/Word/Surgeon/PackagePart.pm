@@ -19,18 +19,18 @@ use namespace::clean -except => 'meta';
 our $VERSION = '1.08';
 
 # attributes passed to the constructor
-has 'surgeon'            => (is => 'ro', isa => 'MsOffice::Word::Surgeon', required => 1, weak_ref => 1);
-has 'part_name'          => (is => 'ro', isa => 'Str',                     required => 1);
+has 'surgeon'              => (is => 'ro', isa => 'MsOffice::Word::Surgeon', required => 1, weak_ref => 1);
+has 'part_name'            => (is => 'ro', isa => 'Str',                     required => 1);
 
 
 # attributes constructed by the module -- not received through the constructor
 sub has_lazy ($@) {my $attr = shift; has($attr => @_, init_arg => undef, lazy => 1, builder => "_$attr")}
-has_lazy 'contents'      => (is => 'rw', isa => 'Str',      trigger => sub {shift->clear_runs});
-has_lazy 'runs'          => (is => 'ro', isa => 'ArrayRef', clearer => 'clear_runs');
-has_lazy 'relationships' => (is => 'ro', isa => 'ArrayRef');
-has_lazy 'images'        => (is => 'ro', isa => 'HashRef');
+has_lazy 'contents'        => (is => 'rw', isa => 'Str',      trigger => \&on_new_contents);
+has_lazy 'runs'            => (is => 'ro', isa => 'ArrayRef', clearer => 'clear_runs');
+has_lazy 'relationships'   => (is => 'ro', isa => 'ArrayRef');
+has_lazy 'images'          => (is => 'ro', isa => 'HashRef');
 
-
+has 'contents_has_changed' => (is => 'bare', isa => 'Bool', default => 0);
 
 #======================================================================
 # GLOBAL VARIABLES
@@ -52,7 +52,7 @@ my @noise_reduction_list = qw/proof_checking revision_ids
                               empty_run_props soft_hyphens/;
 
 #======================================================================
-# LAZY ATTRIBUTE CONSTRUCTORS
+# LAZY ATTRIBUTE CONSTRUCTORS AND TRIGGERS
 #======================================================================
 
 
@@ -113,6 +113,7 @@ sub _runs {
 sub _relationships {
   my $self = shift;
 
+  # xml that describes the relationships for this package part
   my $rel_xml = $self->_rels_xml;
 
   state $rx_relationship = qr[<Relationship     \s+
@@ -120,6 +121,7 @@ sub _relationships {
                                Type="([^"]+?)"  \s+
                                Target="([^"]+?)"/>]x;
 
+  # parse the relationships and assemble into a sparse array indexed by relationship ids
   my @relationships;
   while ($rel_xml =~ /$rx_relationship/g) {
     my %r;
@@ -128,6 +130,7 @@ sub _relationships {
     ($r{short_type} = $r{type}) =~ s[^.*/][];
     $relationships[$r{num}] = \%r;
   }
+
   return \@relationships;
 }
 
@@ -160,7 +163,12 @@ sub _images {
 
 sub _contents {shift->original_contents}
 
+sub on_new_contents {
+  my $self = shift;
 
+  $self->clear_runs;
+  $self->{contents_has_changed} = 1;
+}
 
 #======================================================================
 # METHODS
@@ -279,6 +287,13 @@ sub reduce_all_noises {
 sub suppress_bookmarks {
   my ($self, @names_to_erase) = @_;
 
+  # closure to decide what to do with bookmark contents
+  my %should_erase_contents = map {($_ => 1)} @names_to_erase;
+  my $deal_with_bookmark_text = sub {
+    my ($bookmark_name, $bookmark_contents) = @_;
+    return $should_erase_contents{$bookmark_name} ? "" : $bookmark_contents;
+  };
+
   # regex to find bookmarks markup
   state $bookmark_rx = qr{
      <w:bookmarkStart         # initial tag
@@ -290,13 +305,6 @@ sub suppress_bookmarks {
        \s+ w:id="\1"          # same 'id' attribute
        .*? />                 # end of this tag
     }sx;
-
-  # closure to decide what to do with bookmark contents
-  my %should_erase_contents = map {($_ => 1)} @names_to_erase;
-  my $deal_with_bookmark_text = sub {
-    my ($bookmark_name, $bookmark_contents) = @_;
-    return $should_erase_contents{$bookmark_name} ? "" : $bookmark_contents;
-  };
 
   # remove bookmarks markup
   my $contents = $self->contents;
@@ -368,6 +376,9 @@ sub unlink_fields {
 sub replace {
   my ($self, $pattern, $replacement_callback, %replacement_args) = @_;
 
+warn "replace ", $self->part_name, "\n";
+  $DB::single = 1 if $self->part_name eq 'document';
+
   # cleanup the XML structure so that replacements work better
   my $keep_xml_as_is = delete $replacement_args{keep_xml_as_is};
   $self->cleanup_XML unless $keep_xml_as_is;
@@ -390,7 +401,8 @@ sub replace {
 sub _update_contents_in_zip { # called for each part before saving the zip file
   my $self = shift;
 
-  $self->surgeon->xml_member($self->zip_member_name, $self->contents);
+  $self->surgeon->xml_member($self->zip_member_name, $self->contents)
+    if $self->{contents_has_changed};
 }
 
 
@@ -427,6 +439,14 @@ sub add_image {
   # add the image as a new member into the archive
   my $member_name = "word/$target";
   $self->surgeon->zip->addString(\$image_PNG_content, $member_name);
+
+  # update the global content_types if it doesn't include PNG
+  my $ct = $self->surgeon->_content_types;
+  if ($ct !~ /Extension="png"/) {
+    $ct =~ s[(<Types[^>]+>)][$1<Default Extension="png" ContentType="image/png"/>];
+    $self->surgeon->_content_types($ct);
+  }
+
 
   # return the relationship id
   return $rId;
@@ -500,8 +520,8 @@ L<MsOffice::Word::Surgeon::Run> objects.
 
 =item relationships
 
-an arrayref of Office relationships associated with this part. This information is stored
-in a C<.rels> member in the ZIP archive, named after the name of the package part.
+an arrayref of Office relationships associated with this part. This information comes from
+a C<.rels> member in the ZIP archive, named after the name of the package part.
 Array indices correspond to relationship numbers. Array values are hashrefs with
 keys
 
@@ -530,8 +550,6 @@ added for having a complete Zip member name.
 
 =back
 
-Currently the only purpose of this attribute is to deal with images; other types
-of relationships are ignored.
 
 
 =item images
@@ -730,14 +748,27 @@ replacements is merely returned to the caller.
 
 
 
+=head3 replace_image
+
+  $part->replace_image($image_title, $image_PNG_content);
+
+Replaces an existing PNG image by a new image. All features of the old image will
+be preserved (size, positioning, border, etc.) -- only the image itself will be
+replaced. The C<$image_title> must correspond to the title set in Word
+through the image formatting panel, "properties" tab, "title" field.
+
+
+
 =head3 add_image
 
-  $part->add_image($image_PNG_content);
+  my $rId = $part->add_image($image_PNG_content);
 
 Stores the given PNG image within the ZIP file, adds it as a relationship to the
-current part, and returns the relationship id. That id can then be referred from the 
-part contents to specify where the image should be displayed.
-
+current part, and returns the relationship id. This operation is not sufficient 
+to  make the image visible in Word : it just stores the image, but you still
+have to insert a proper C<drawing> node in the contents XML, using the C<$rId>.
+Future versions of this module may offer helper methods for that purpose; 
+currently it must be done by hand.
 
 
 

@@ -1,4 +1,6 @@
 package MsOffice::Word::Surgeon::Utils;
+use strict;
+use warnings;
 
 use Exporter  qw/import/;
 our @EXPORT = qw/maybe_preserve_spaces is_at_run_level/;
