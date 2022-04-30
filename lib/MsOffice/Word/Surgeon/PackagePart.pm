@@ -20,7 +20,7 @@ use constant XML_SIMPLE_INDENT => 1;
 
 use namespace::clean -except => 'meta';
 
-our $VERSION = '1.08';
+our $VERSION = '2.0';
 
 # attributes passed to the constructor
 has       'surgeon'        => (is => 'ro', isa => 'MsOffice::Word::Surgeon', required => 1, weak_ref => 1);
