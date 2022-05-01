@@ -88,14 +88,8 @@ sub replace {
                             }};
 
   foreach my $inner_xml (@inner_xmls) {
-    if (is_at_run_level($inner_xml)) {
-      $maybe_close_run->();
-      $xml .= $inner_xml;
-    }
-    else {
-      $maybe_open_run->();
-      $xml .= $inner_xml;
-    }
+    is_at_run_level($inner_xml) ? $maybe_close_run->() : $maybe_open_run->();
+    $xml .= $inner_xml;
   }
 
   $maybe_close_run->();
