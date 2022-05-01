@@ -247,7 +247,8 @@ MsOffice::Word::Surgeon - tamper with the guts of Microsoft docx documents, with
   my $surgeon = MsOffice::Word::Surgeon->new(docx => $filename);
 
   # extract plain text
-  my $text = $surgeon->document->plain_text;
+  my $main_text    = $surgeon->document->plain_text;
+  my @header_texts = map {$surgeon->part($_)->plain_text} $surgeon->headers;
 
   # anonymize
   my %alias = ('Claudio MONTEVERDI' => 'A_____', 'Heinrich SCHÜTZ' => 'B_____');
@@ -266,6 +267,13 @@ MsOffice::Word::Surgeon - tamper with the guts of Microsoft docx documents, with
   # save the result
   $surgeon->overwrite; # or ->save_as($new_filename);
 
+
+=head1 VERSION
+
+WARNING: this is version 2.0. Due to internal refactorings, some
+changes made to the application programming interface (API) are
+incompatible with version 1.  Client programs may need some minor
+adaptations.
 
 =head1 DESCRIPTION
 
