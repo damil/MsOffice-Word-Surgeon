@@ -1,4 +1,5 @@
 package MsOffice::Word::Surgeon::Revision;
+use 5.24.0;
 use Moose;
 use MooseX::StrictConstructor;
 use Moose::Util::TypeConstraints;
@@ -7,10 +8,16 @@ use POSIX                          qw(strftime);
 use MsOffice::Word::Surgeon::Utils qw(maybe_preserve_spaces);
 use namespace::clean -except => 'meta';
 
+our $VERSION = '2.0';
+
 subtype 'Date_ISO',
   as      'Str',
   where   {/\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2})?Z?/},
   message {"$_ is not a date in ISO format yyyy-mm-ddThh:mm:ss"};
+
+#======================================================================
+# ATTRIBUTES
+#======================================================================
 
 has 'rev_id'      => (is => 'ro', isa => 'Num', required => 1);
 has 'to_delete'   => (is => 'ro', isa => 'Str');
@@ -21,7 +28,10 @@ has 'date'        => (is => 'ro', isa => 'Date_ISO', default =>
 has 'run'         => (is => 'ro', isa => 'MsOffice::Word::Surgeon::Run');
 has 'xml_before'  => (is => 'ro', isa => 'Str');
 
-our $VERSION = '2.0';
+
+#======================================================================
+# INSTANCE CONSTRUCTION
+#======================================================================
 
 sub BUILD {
   my $self = shift;
@@ -30,6 +40,10 @@ sub BUILD {
     or croak "attempt to create a Revision object without 'to_delete' nor 'to_insert' args";
 }
 
+
+#======================================================================
+# METHODS
+#======================================================================
 
 sub as_xml {
   my ($self) = @_;

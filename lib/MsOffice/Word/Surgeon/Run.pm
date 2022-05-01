@@ -1,5 +1,5 @@
 package MsOffice::Word::Surgeon::Run;
-use feature 'state';
+use 5.24.0;
 use Moose;
 use MooseX::StrictConstructor;
 use MsOffice::Word::Surgeon::Utils qw(maybe_preserve_spaces is_at_run_level);
@@ -26,10 +26,10 @@ has 'inner_texts' => (is => 'ro', required => 1,
 sub as_xml {
   my $self = shift;
   my $xml  = $self->xml_before;
-  if (@{$self->inner_texts}) {
+  if ($self->inner_texts->@*) {
     $xml .= "<w:r>";
     $xml .= "<w:rPr>" . $self->props . "</w:rPr>" if $self->props;
-    $xml .= $_->as_xml foreach @{$self->inner_texts};
+    $xml .= $_->as_xml foreach $self->inner_texts->@*;
     $xml .= "</w:r>";
   }
 
@@ -52,14 +52,14 @@ sub merge {
            . $next_run->xml_before;
 
   # loop over all text nodes of the next run
-  foreach my $txt (@{$next_run->inner_texts}) {
-    if (@{$self->{inner_texts}} && !$txt->xml_before) {
+  foreach my $txt ($next_run->inner_texts->@*) {
+    if ($self->{inner_texts}->@* && !$txt->xml_before) {
       # concatenate current literal text with the previous text node
       $self->{inner_texts}[-1]->merge($txt);
     }
     else {
       # cannot merge, just add to the list of inner text nodes
-      push @{$self->{inner_texts}}, $txt;
+      push $self->{inner_texts}->@*, $txt;
     }
   }
 }
@@ -68,14 +68,14 @@ sub merge {
 sub replace {
   my ($self, $pattern, $replacement_callback, %replacement_args) = @_;
 
-  my $xml = $self->xml_before;
-
+  # apply replacement to inner texts
   $replacement_args{run} = $self;
-
   my @inner_xmls
     = map {$_->replace($pattern, $replacement_callback, %replacement_args)}
-          @{$self->inner_texts};
+          $self->inner_texts->@*;
 
+  # a machinery of closures for assembling the new xml
+  my $xml = $self->xml_before;
   my $is_run_open;
   my $maybe_open_run  = sub {if (!$is_run_open) {
                               $xml .= "<w:r>";
@@ -87,15 +87,17 @@ sub replace {
                               $is_run_open = undef;
                             }};
 
+  # apply the machinery, loop over inner texts
   foreach my $inner_xml (@inner_xmls) {
     is_at_run_level($inner_xml) ? $maybe_close_run->() : $maybe_open_run->();
     $xml .= $inner_xml;
   }
 
+  # final cleanup
   $maybe_close_run->();
+
   return $xml;
 }
-
 
 
 

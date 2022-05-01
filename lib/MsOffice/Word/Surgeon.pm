@@ -1,5 +1,5 @@
 package MsOffice::Word::Surgeon;
-use 5.22.0;
+use 5.24.0;
 use Moose;
 use MooseX::StrictConstructor;
 use Archive::Zip                          qw(AZ_OK);

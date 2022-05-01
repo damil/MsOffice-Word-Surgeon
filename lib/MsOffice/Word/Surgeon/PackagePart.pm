@@ -1,5 +1,5 @@
 package MsOffice::Word::Surgeon::PackagePart;
-use feature 'state';
+use 5.24.0;
 use Moose;
 use MooseX::StrictConstructor;
 use MsOffice::Word::Surgeon::Utils qw(maybe_preserve_spaces is_at_run_level);
@@ -9,10 +9,8 @@ use XML::LibXML;
 use List::Util                     qw(max);
 use Carp                           qw(croak);
 
-
 # syntactic sugar for attributes
 sub has_inner ($@) {my $attr = shift; has($attr => @_, lazy => 1, builder => "_$attr", init_arg => undef)}
-
 
 # constant integers to specify indentation modes -- see L<XML::LibXML>
 use constant XML_NO_INDENT     => 0;
@@ -21,6 +19,12 @@ use constant XML_SIMPLE_INDENT => 1;
 use namespace::clean -except => 'meta';
 
 our $VERSION = '2.0';
+
+
+#======================================================================
+# ATTRIBUTES
+#======================================================================
+
 
 # attributes passed to the constructor
 has       'surgeon'        => (is => 'ro', isa => 'MsOffice::Word::Surgeon', required => 1, weak_ref => 1);
@@ -153,7 +157,7 @@ sub _images {
     if ($drawing =~ m[<wp:docPr [^>]*? title="([^"]+)"/>
                       .*?
                       <a:blip \s+ r:embed="(\w+)"]x) {
-      my ($title, $rId)    = ($1, $2);
+      my ($title, $rId) = ($1, $2);
       $image{$title} = "word/$rel_image{$rId}"
                        # NOTE: targets in the rels XML miss the "word/" prefix, I don't know why.
         or die "couldn't find image for relationship '$rId' associated with image '$title'";
@@ -387,9 +391,8 @@ sub replace {
   my $dont_overwrite_contents = delete $replacement_args{dont_overwrite_contents};
 
   # apply replacements and generate new XML
-  my $xml = join "", map {
-    $_->replace($pattern, $replacement_callback, %replacement_args)
-  }  @{$self->runs};
+  my $xml = join "",
+            map {$_->replace($pattern, $replacement_callback, %replacement_args)} $self->runs->@*;
 
   # overwrite previous contents
   $self->contents($xml) unless $dont_overwrite_contents;
@@ -446,7 +449,6 @@ sub add_image {
     $ct =~ s[(<Types[^>]+>)][$1<Default Extension="png" ContentType="image/png"/>];
     $self->surgeon->_content_types($ct);
   }
-
 
   # return the relationship id
   return $rId;
@@ -761,10 +763,10 @@ through the image formatting panel, "properties" tab, "title" field.
   my $rId = $part->add_image($image_PNG_content);
 
 Stores the given PNG image within the ZIP file, adds it as a relationship to the
-current part, and returns the relationship id. This operation is not sufficient 
+current part, and returns the relationship id. This operation is not sufficient
 to  make the image visible in Word : it just stores the image, but you still
 have to insert a proper C<drawing> node in the contents XML, using the C<$rId>.
-Future versions of this module may offer helper methods for that purpose; 
+Future versions of this module may offer helper methods for that purpose;
 currently it must be done by hand.
 
 

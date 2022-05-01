@@ -1,5 +1,5 @@
 package MsOffice::Word::Surgeon::Text;
-use feature 'state';
+use 5.24.0;
 use Moose;
 use MooseX::StrictConstructor;
 use MsOffice::Word::Surgeon::Utils qw(maybe_preserve_spaces is_at_run_level);
