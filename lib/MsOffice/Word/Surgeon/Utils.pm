@@ -53,7 +53,7 @@ attribute C<<  xml:space="preserve" >>
 
    if (is_at_run_level($xml)) {...}
 
-Returns true if the given XML fragment ends with a C<< </w:run> >>,
+Returns true if the given XML fragment ends with a C<< </w:r> >>,
 C<< </w:del> >> or C<< </w:ins> >> node.
 
 
