@@ -203,10 +203,16 @@ sub clone {
 #======================================================================
 
 
+sub _update_contents_in_zip {
+  my $self = shift;
+  $_->_update_contents_in_zip foreach values $self->parts->%*;
+}
+
+
 sub overwrite {
   my $self = shift;
 
-  $_->_update_contents_in_zip foreach values $self->parts->%*;
+  $self->_update_contents_in_zip;
   $self->zip->overwrite == AZ_OK
     or croak "error overwriting zip archive " . $self->docx;
 }
@@ -214,7 +220,7 @@ sub overwrite {
 sub save_as {
   my ($self, $docx) = @_;
 
-  $_->_update_contents_in_zip foreach values $self->parts->%*;
+  $self->_update_contents_in_zip;
   $self->zip->writeToFileNamed($docx) == AZ_OK
     or croak "error writing zip archive to $docx";
 }
