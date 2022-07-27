@@ -784,16 +784,22 @@ replacements is merely returned to the caller.
 =back
 
 
-
 =head3 replace_image
 
-  $part->replace_image($image_title, $image_PNG_content);
+  $part->replace_image($image_alt_text, $image_PNG_content);
 
 Replaces an existing PNG image by a new image. All features of the old image will
 be preserved (size, positioning, border, etc.) -- only the image itself will be
-replaced. The C<$image_title> must correspond to the title set in Word
-through the image formatting panel, "properties" tab, "title" field.
+replaced. The C<$image_alt_text> must correspond to the I<alternative text> set in Word
+for this image.
 
+This operation replaces a ZIP member within the C<.docx> file. If several XML
+nodes refer to the I<same> ZIP member, i.e. if the same image is displayed at several
+locations, the new image will appear at all locations, even if they do not have the
+same alternative text -- unfortunately this module currently has no facility for
+duplicating an existing image into separate instances. So if your intent is to only replace
+one image, your original document should contain several distinct images, coming from
+several distinct C<.PNG> file copies.
 
 
 =head3 add_image
@@ -806,8 +812,6 @@ to  make the image visible in Word : it just stores the image, but you still
 have to insert a proper C<drawing> node in the contents XML, using the C<$rId>.
 Future versions of this module may offer helper methods for that purpose;
 currently it must be done by hand.
-
-
 
 
 =head1 AUTHOR

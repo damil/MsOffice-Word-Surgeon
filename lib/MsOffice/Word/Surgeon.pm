@@ -268,7 +268,7 @@ MsOffice::Word::Surgeon - tamper with the guts of Microsoft docx documents, with
                                             );
     return $replacement;
   };
-  $surgeon->document->replace(qr[$pattern], $replacement_callback);
+  $surgeon->all_parts_do(replace => qr[$pattern], $replacement_callback);
 
   # save the result
   $surgeon->overwrite; # or ->save_as($new_filename);
@@ -398,7 +398,6 @@ Returns the ordered list of names of header members stored in the ZIP file.
 Returns the ordered list of names of footer members stored in the ZIP file.
 
 
-
 =head2 Other methods
 
 
@@ -414,7 +413,8 @@ Returns the L<MsOffice::Word::Surgeon::PackagePart> object corresponding to the 
   my $result = $surgeon->all_parts_do($method_name => %args);
 
 Calls the given method on all part objects. Results are accumulated
-in a hash, with part names as keys to the results.
+in a hash, with part names as keys to the results. In most cases this is
+used to invoqke the L<MsOffice::Word::Surgeon::PackagePart/replace> method.
 
 
 =head3 xml_member
