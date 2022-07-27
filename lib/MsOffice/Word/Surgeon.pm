@@ -97,7 +97,7 @@ sub _parts {
                                                       part_name => 'document');
 
   # gather names of headers and footers related to that document
-  my @headers_footers = map  {$_->{target} =~ s/\.xml$//r}
+  my @headers_footers = map  {$_->{Target} =~ s/\.xml$//r}
                         grep {$_ && $_->{short_type} =~ /^(header|footer)$/}
                         $doc->relationships->@*;
 
@@ -274,24 +274,20 @@ MsOffice::Word::Surgeon - tamper with the guts of Microsoft docx documents, with
   $surgeon->overwrite; # or ->save_as($new_filename);
 
 
-=head1 VERSION
-
-WARNING: this is version 2.0. Due to internal refactorings, some
-changes made to the application programming interface (API) are
-incompatible with version 1.  Client programs may need some minor
-adaptations.
-
 =head1 DESCRIPTION
 
 =head2 Purpose
 
-This module supports a few operations for modifying or extracting text
-from Microsoft Word documents in '.docx' format -- therefore the name
+This module supports a few operations for inspecting or modifying contents
+in Microsoft Word documents in '.docx' format -- therefore the name
 'surgeon'. Since a surgeon does not give life, there is no support for
 creating fresh documents; if you have such needs, use one of the other
-packages listed in the L<SEE ALSO> section. To my knowledge, this is the
-only solution (even in other languages) for applying regular expressions
-to the contents of Word documents.
+packages listed in the L<SEE ALSO> section -- or use the companion module
+L<MsOffice::Word::Template>.
+
+To my knowledge, this surgeon is the only solution (even when considering other
+programming languages) for applying regular expressions to the contents of Word
+documents.
 
 Some applications for this module are :
 
@@ -324,7 +320,11 @@ templating, i.e. replacement of special markup by contents coming from a data tr
 
 =item *
 
-pretty-printing the internal XML structure
+insertion of generated images (for example barcodes) -- see L<MsOffice::Word::Surgeon::PackagePart/images>;
+
+=item *
+
+pretty-printing the internal XML structure.
 
 =back
 
@@ -419,9 +419,9 @@ in a hash, with part names as keys to the results.
 
 =head3 xml_member
 
-  my $xml = $surgeon->xml_member($member_name);
+  my $xml = $surgeon->xml_member($member_name); # reading
   # or
-  $surgeon->xml_member($member_name, $new_xml);
+  $surgeon->xml_member($member_name, $new_xml); # writing
 
 Reads or writes the given member name in the ZIP file, with utf8 decoding or encoding.
 
