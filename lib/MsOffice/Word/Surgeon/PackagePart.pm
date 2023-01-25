@@ -18,7 +18,7 @@ use constant XML_SIMPLE_INDENT => 1;
 
 use namespace::clean -except => 'meta';
 
-our $VERSION = '2.0';
+our $VERSION = '2.01';
 
 
 #======================================================================

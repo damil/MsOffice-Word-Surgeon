@@ -15,7 +15,7 @@ sub has_inner ($@) {my $attr = shift; has_lazy($attr => @_, init_arg => undef)}
 
 use namespace::clean -except => 'meta';
 
-our $VERSION = '2.0';
+our $VERSION = '2.01';
 
 
 #======================================================================
@@ -285,10 +285,6 @@ creating fresh documents; if you have such needs, use one of the other
 packages listed in the L<SEE ALSO> section -- or use the companion module
 L<MsOffice::Word::Template>.
 
-To my knowledge, this surgeon is the only solution (even when considering other
-programming languages) for applying regular expressions to the contents of Word
-documents.
-
 Some applications for this module are :
 
 =over
@@ -327,6 +323,9 @@ insertion of generated images (for example barcodes) -- see L<MsOffice::Word::Su
 pretty-printing the internal XML structure.
 
 =back
+
+
+
 
 =head2 Operating mode
 
