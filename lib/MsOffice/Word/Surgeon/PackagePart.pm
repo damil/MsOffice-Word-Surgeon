@@ -300,35 +300,121 @@ sub reduce_all_noises {
   $self->reduce_noise(@noise_reduction_list);
 }
 
+
+
+sub _split_into_bookmark_nodes {
+  my ($self, $xml) = @_;
+
+  # regex to find bookmark tags
+  state $bookmark_rx = qr{
+     (                               # the whole tag                       -- capture 1
+      <w:bookmark(Start|End)         # kind of tag name                    -- capture 2
+        .+?                          # optional attributes (may be w:colFirst, w:colLast) -- no capture
+        w:id="(\d+)"                 # 'id' attribute, bookmark identifier -- capture 3
+        (?: \h+ w:name="([^"]+)")?   # optional 'name' attribute           -- capture 4
+        \h* />                       # end of this tag
+     )                               # end of capture 1
+    }sx;
+
+  # split the whole xml according to the regex. Captured groups are also added to the stack
+  my @xml_chunks = split /$bookmark_rx/, $xml;
+
+  # walk through the list of fragments and build a stack of hashrefs as bookmark nodes
+  my @bookmark_nodes;
+  while (my @chunk = splice @xml_chunks, 0, 5) {
+    my %node;  @node{qw/xml_before node_xml node_kind id name/} = @chunk; # initialize a node hash
+    $node{$_} //= "" for qw/xml_before node_kind node_xml/;               # empty strings instead of undef
+    push @bookmark_nodes, \%node;
+  }
+  # note : in most cases the last "node" is not really a node : it has no 'node_kind', but only 'xml_before'
+  
+  # return the stack
+  return @bookmark_nodes;
+}
+
+
+
 sub suppress_bookmarks {
   my ($self, @names_to_erase) = @_;
 
-  # closure to decide what to do with bookmark contents
+  # names of special bookmarks (typically ASK fields) for which the content needs to be erased
   my %should_erase_contents = map {($_ => 1)} @names_to_erase;
-  my $deal_with_bookmark_text = sub {
-    my ($bookmark_name, $bookmark_contents) = @_;
-    return $should_erase_contents{$bookmark_name} ? "" : $bookmark_contents;
-  };
 
-  # regex to find bookmarks markup
-  state $bookmark_rx = qr{
-     <w:bookmarkStart         # initial tag
-       .+? w:id="(\d+)"       # 'id' attribute, bookmark identifier -- capture 1
-       .+? w:name="([^"]+)"   # 'name' attribute                    -- capture 2
-       .*? />                 # end of this tag
-       (.*?)                  # bookmark contents (may be empty)    -- capture 3
-     <w:bookmarkEnd           # ending tag
-       \s+ w:id="\1"          # same 'id' attribute
-       .*? />                 # end of this tag
-    }sx;
+  # loop on bookmark nodes
+  my @bookmark_nodes = $self->_split_into_bookmark_nodes($self->contents);
+  my %node_ix_by_id;
+  while (my ($ix, $node) = each @bookmark_nodes) {
+    if ($node->{tag} eq 'Start') {
+      $node_ix_by_id{$node->{id}} = $ix;
+    }
+    elsif ($node->{tag} eq 'End') {
+      # find the corresponding bookmarkStart node
+      my $start_ix       = $node_ix_by_id{$node->{id}};
+      my $start_node     = $bookmark_nodes[$start_ix];
+      my $bookmark_name  = $start_node->{name};
 
-  # remove bookmarks markup
-  my $contents = $self->contents;
-  $contents    =~ s{$bookmark_rx}{$deal_with_bookmark_text->($2, $3)}eg;
+      # erase the start and end bookmark nodes
+      $start_node->{node_xml} = "";
+      $node->{node_xml}       = "";
 
-  # re-inject the modified contents
-  $self->contents($contents);
+      # if necessary, also erase other xml between start and end
+      if ($should_erase_contents{$bookmark_name}) {
+        for my $erase_ix ($start_ix+1 .. $ix) {
+          my $local_node = $bookmark_nodes[$erase_ix];
+          !$local_node->{node_xml}
+            or die "cannot erase contents of bookmark '$bookmark_name' "
+                  . "because it contains the start of bookmark '$local_node->{name}'";
+          $local_node->{xml_before} = "";
+        }
+      }
+    }
+  }
+
+  # re-build the whole XML from all remaining fragments, and inject it back
+  my $new_contents = join "", map {@{$_}{qw/xml_before node_xml/}} @bookmark_nodes;
+  $self->contents($new_contents);
 }
+
+
+sub reveal_bookmarks {
+  my ($self, %named_args) = @_;
+
+  # closure to generate a visible "run" for marking a start or end bookmark node
+  my $props_for_marking_bookmarks = $named_args{props} // q{<w:highlight w:val="yellow"/>};
+  my $mark_bookmark               = sub { my ($bookmark_name, $end_node) = @_;
+                                          encode_entities(shift);
+                                          return qq{<w:r><w:rPr>$props_for_marking_bookmarks</w:rPr><w:t>&lt;}
+                                               . ($end_node // "") . encode_entities($bookmark_name)
+                                               . qq{&gt;</w:t></w:r>} };
+
+
+    
+  # loop over bookmark nodes
+  my @bookmark_name_by_id;
+  my $paragraph_tracker = MsOffice::Word::Surgeon::PackagePart::_ParaTracker->new;
+  my @bookmark_nodes    = $self->_split_into_bookmark_nodes($self->contents);
+  foreach my $node (@bookmark_nodes) {
+
+    # count opening and closing paragraphs in xml before this node
+    $paragraph_tracker->count_paragraphs($node->{xml_before});
+
+    # add visible runs before or after bookmark nodes
+    if ($node->{node_kind} eq 'Start') {
+      $bookmark_name_by_id[$node->{id}] = $node->{name};
+      substr $node->{node_xml}, 0, 0, $paragraph_tracker->write_within_paragraph($mark_bookmark->($node->{name}))
+        unless $node->{name} eq '_GoBack'
+    }
+    elsif ($node->{node_kind} eq 'End') {
+      my $bookmark_name  = $bookmark_name_by_id[$node->{id}];
+      $node->{node_xml} .= $paragraph_tracker->write_within_paragraph($mark_bookmark->($bookmark_name, "/"));
+    }
+  }
+
+  # re-build the whole XML and inject it back
+  my $new_contents = join "", map {@{$_}{qw/xml_before node_xml/}} @bookmark_nodes;
+  $self->contents($new_contents);
+}
+
 
 sub merge_runs {
   my ($self, %args) = @_;
@@ -507,13 +593,46 @@ sub parse_attrs {  # cheap parsing of attribute lists in an XML node
   my %attr;
   while ($lst_attrs =~ /$attr_pair_regex/g) {
     my ($name, $val) = ($1, $2 // $3);
-    $val =~ s/&(entity_names);/$entity->{$1}/eg;
-    $attr{$name} = $val;
+    $attr{$name} = decode_entities($val);
   }
 
   return %attr;
 }
 
+
+# cheap version for encoding/decoding XML Entities. We just need 4 of them, so no need for a module with complete support.
+my %entities        = (quot => '"', amp => '&', 'lt' => '<', gt => '>');
+my $entity_names    = join "|", keys %entities;
+my $entity_chars    = "[" . join("", values %entities) . "]";
+my %entity_for_char = reverse %entities;
+sub decode_entities { shift =~ s{&($entity_names);}{$entities{$1}               }egr; }
+sub encode_entities { shift =~ s{($entity_chars)}  {'&'.$entity_for_char{$1}.';'}egr; }
+
+
+
+#======================================================================
+# INTERNAL CLASS FOR TRACKING PARAGRAPHS
+#======================================================================
+
+package MsOffice::Word::Surgeon::PackagePart::_ParaTracker;
+
+sub new {my $nb_para = 0; bless \$nb_para, shift};
+
+sub count_paragraphs {
+  my ($self, $xml) = @_;
+
+  # count opening and closing paragraph nodes
+  while ($xml =~  m[<(/)?w:p.*?(/)?>]g) {
+    next if $2; # self-ending node -- doesn't change the number of paragraphs
+    $$self += $1 ? -1 : +1;
+  }
+}
+
+sub write_within_paragraph {
+  my ($self, $xml) = @_;  
+  return $$self ? $xml : "<w:p>$xml</w:p>";
+};
+  
 
 1;
 
