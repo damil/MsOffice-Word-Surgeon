@@ -2,12 +2,13 @@ package MsOffice::Word::Surgeon::PackagePart;
 use 5.24.0;
 use Moose;
 use MooseX::StrictConstructor;
-use MsOffice::Word::Surgeon::Utils qw(maybe_preserve_spaces is_at_run_level);
+use MsOffice::Word::Surgeon::Utils qw(maybe_preserve_spaces is_at_run_level decode_entities);
 use MsOffice::Word::Surgeon::Run;
 use MsOffice::Word::Surgeon::Text;
 use XML::LibXML;
 use List::Util                     qw(max);
-use Carp                           qw(croak carp);
+use Carp::Clan                     qw(^MsOffice::Word::Surgeon); # will import carp, croak, etc.
+
 
 # syntactic sugar for attributes
 sub has_inner ($@) {my $attr = shift; has($attr => @_, lazy => 1, builder => "_$attr", init_arg => undef)}
@@ -18,7 +19,7 @@ use constant XML_SIMPLE_INDENT => 1;
 
 use namespace::clean -except => 'meta';
 
-our $VERSION = '2.03';
+our $VERSION = '2.04';
 
 
 #======================================================================
@@ -344,10 +345,10 @@ sub suppress_bookmarks {
   my @bookmark_nodes = $self->_split_into_bookmark_nodes($self->contents);
   my %node_ix_by_id;
   while (my ($ix, $node) = each @bookmark_nodes) {
-    if ($node->{tag} eq 'Start') {
+    if ($node->{node_kind} eq 'Start') {
       $node_ix_by_id{$node->{id}} = $ix;
     }
-    elsif ($node->{tag} eq 'End') {
+    elsif ($node->{node_kind} eq 'End') {
       # find the corresponding bookmarkStart node
       my $start_ix       = $node_ix_by_id{$node->{id}};
       my $start_node     = $bookmark_nodes[$start_ix];
@@ -377,21 +378,15 @@ sub suppress_bookmarks {
 
 
 sub reveal_bookmarks {
-  my ($self, %named_args) = @_;
+  my ($self, @marking_args) = @_;
 
-  # closure to generate a visible "run" for marking a start or end bookmark node
-  my $props_for_marking_bookmarks = $named_args{props} // q{<w:highlight w:val="yellow"/>};
-  my $mark_bookmark               = sub { my ($bookmark_name, $end_node) = @_;
-                                          encode_entities(shift);
-                                          return qq{<w:r><w:rPr>$props_for_marking_bookmarks</w:rPr><w:t>&lt;}
-                                               . ($end_node // "") . encode_entities($bookmark_name)
-                                               . qq{&gt;</w:t></w:r>} };
+  # auxiliary objects
+  my $marker            = MsOffice::Word::Surgeon::PackagePart::_BookmarkMarker->new(@marking_args);
+  my $paragraph_tracker = MsOffice::Word::Surgeon::PackagePart::_ParaTracker->new;
 
-
-    
   # loop over bookmark nodes
   my @bookmark_name_by_id;
-  my $paragraph_tracker = MsOffice::Word::Surgeon::PackagePart::_ParaTracker->new;
+
   my @bookmark_nodes    = $self->_split_into_bookmark_nodes($self->contents);
   foreach my $node (@bookmark_nodes) {
 
@@ -401,12 +396,11 @@ sub reveal_bookmarks {
     # add visible runs before or after bookmark nodes
     if ($node->{node_kind} eq 'Start') {
       $bookmark_name_by_id[$node->{id}] = $node->{name};
-      substr $node->{node_xml}, 0, 0, $paragraph_tracker->write_within_paragraph($mark_bookmark->($node->{name}))
-        unless $node->{name} eq '_GoBack'
+      substr $node->{node_xml}, 0, 0, $paragraph_tracker->maybe_add_paragraph($marker->mark($node->{name}, 0));
     }
     elsif ($node->{node_kind} eq 'End') {
       my $bookmark_name  = $bookmark_name_by_id[$node->{id}];
-      $node->{node_xml} .= $paragraph_tracker->write_within_paragraph($mark_bookmark->($bookmark_name, "/"));
+      $node->{node_xml} .= $paragraph_tracker->maybe_add_paragraph($marker->mark($bookmark_name, 1));
     }
   }
 
@@ -593,30 +587,28 @@ sub parse_attrs {  # cheap parsing of attribute lists in an XML node
   my %attr;
   while ($lst_attrs =~ /$attr_pair_regex/g) {
     my ($name, $val) = ($1, $2 // $3);
-    $attr{$name} = decode_entities($val);
+    decode_entities($val);
+    $attr{$name} = $val;
   }
 
   return %attr;
 }
 
 
-# cheap version for encoding/decoding XML Entities. We just need 4 of them, so no need for a module with complete support.
-my %entities        = (quot => '"', amp => '&', 'lt' => '<', gt => '>');
-my $entity_names    = join "|", keys %entities;
-my $entity_chars    = "[" . join("", values %entities) . "]";
-my %entity_for_char = reverse %entities;
-sub decode_entities { shift =~ s{&($entity_names);}{$entities{$1}               }egr; }
-sub encode_entities { shift =~ s{($entity_chars)}  {'&'.$entity_for_char{$1}.';'}egr; }
-
-
-
 #======================================================================
 # INTERNAL CLASS FOR TRACKING PARAGRAPHS
 #======================================================================
 
-package MsOffice::Word::Surgeon::PackagePart::_ParaTracker;
+package # hide from PAUSE
+        MsOffice::Word::Surgeon::PackagePart::_ParaTracker;
+use strict;
+use warnings;
 
-sub new {my $nb_para = 0; bless \$nb_para, shift};
+sub new {
+  my $class = shift;
+  my $nb_para = 0;
+  bless \$nb_para, $class;
+}
 
 sub count_paragraphs {
   my ($self, $xml) = @_;
@@ -628,11 +620,62 @@ sub count_paragraphs {
   }
 }
 
-sub write_within_paragraph {
+sub maybe_add_paragraph {
   my ($self, $xml) = @_;  
-  return $$self ? $xml : "<w:p>$xml</w:p>";
+
+  # add paragraph nodes only if the ParaTracker is currently outside of any paragraph
+  my $is_outside_para = !$$self;
+  return $is_outside_para && $xml ? "<w:p>$xml</w:p>" : $xml;
 };
   
+
+#======================================================================
+# INTERNAL CLASS FOR INTRODUCING BOOKMARK MARKERS
+#======================================================================
+
+package # hide from PAUSE
+        MsOffice::Word::Surgeon::PackagePart::_BookmarkMarker;
+use strict;
+use warnings;
+use MsOffice::Word::Surgeon::Utils qw(encode_entities);
+use Carp                           qw(croak carp);
+
+sub new {
+  my $class = shift;
+  my %self = @_;
+
+  $self{color} //= "yellow";
+  $self{props} //=  qq{<w:highlight w:val="%s"/>};
+  $self{start} //=  "<%s>";
+  $self{end}   //=  "</%s>";
+  $self{ignore}  = qr/^_/ if not exists $self{ignore};
+
+  $self{color} =~ m{ ^( black     | blue | cyan | darkBlue    | darkCyan |
+                        darkGray  | darkGreen   | darkMagenta | darkRed  | darkYellow | green |
+                        lightGray | magenta     | none        | red      | white      | yellow )$}x
+    or carp "invalid color : $self{color}";                          
+                          
+  bless \%self, $class;
+}
+
+sub mark {
+  my ($self, $bookmark_name, $is_end_node) = @_;
+
+  # some bookmarks are just ignored
+  return ""
+    if $self->{ignore} and $bookmark_name =~ $self->{ignore};
+
+  # build the visible text
+  no warnings 'redundant'; # because sprintf templates may decide not to use their arguments
+  my $sprintf_node = $is_end_node ? $self->{end} : $self->{start};
+  my $text         = sprintf $sprintf_node, $bookmark_name;
+  my $props        = sprintf $self->{props}, $self->{color};
+  encode_entities($text);
+
+  # full xml for a visible run before or after the boookmark node
+  return "<w:r><w:rPr>$props</w:rPr><w:t>$text</w:t></w:r>";
+}
+
 
 1;
 
@@ -873,6 +916,55 @@ intact the contents of the bookmark. However, when the name of a
 bookmark belongs to the list C<< @names_to_erase >>, the contents
 is also removed. Currently this is used for suppressing ASK fields,
 because such fields contain a bookmark content that is never displayed by MsWord.
+
+
+=head3 reveal_bookmarks
+
+  $part->reveal_bookmarks(color => 'green');
+
+Usually bookmarks in MsWord are not visible; the only way to have a visual clue is to turn on
+an option in
+L<https://support.microsoft.com/en-gb/office/troubleshoot-bookmarks-9cad566f-913d-49c6-8d37-c21e0e8d6db0|Advanced / Show document content / Show bookmarks> -- but this only displays where bookmarks start and end, without the names of the bookmarks.
+
+The C<reveal_bookmarks()> method will insert a visible run before each bookmark start and after each bookmark end, showing
+the bookmark name. This is an interesting tool for documenting where bookmarks are located in an existing document.
+
+Options to this method are :
+
+=over
+
+=item color
+
+The highligting color for visible marks. This should be a valid
+highlighting color, i.e black, blue, cyan, darkBlue, darkCyan,
+darkGray, darkGreen, darkMagenta, darkRed, darkYellow, green,
+lightGray, magenta, none, red, white or yellow. Default is yellow.
+
+=item props
+
+A string in C<sprintf> format for building the XML to be inserted in C<< <w:rPr> >> node
+when displaying bookmarks marks, i.e. the style for displaying such marks.
+The default is just a highlighting property :  C<< <w:highlight w:val="%s"/> >>.
+
+=item start
+
+A string in C<sprintf> format for generating text before a bookmark start.
+Default is C<< <%s> >>.
+
+=item end
+
+A string in C<sprintf> format for generating text after a bookmark end.
+Default is C<< </%s> >>.
+
+=item ignore
+
+A regexp for deciding wich bookmarks will not be revealed. Default is C<< qr/^_/ >>,
+because bookmarks with an initidal underscore are usually technical bookmarks inserted
+automatically by MsWord, such as C<_GoBack> or C<_Toc53196147>.
+
+
+=back
+
 
 
 
