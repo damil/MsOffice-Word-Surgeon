@@ -1,6 +1,7 @@
 Build.PL
 Changes
 lib/MsOffice/Word/Surgeon.pm
+lib/MsOffice/Word/Surgeon/Carp.pm
 lib/MsOffice/Word/Surgeon/PackagePart.pm
 lib/MsOffice/Word/Surgeon/Revision.pm
 lib/MsOffice/Word/Surgeon/Run.pm
