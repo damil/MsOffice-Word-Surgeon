@@ -15,7 +15,7 @@ sub has_inner ($@) {my $attr = shift; has_lazy($attr => @_, init_arg => undef)}
 
 use namespace::clean -except => 'meta';
 
-our $VERSION = '2.05';
+our $VERSION = '2.06';
 
 
 #======================================================================
@@ -311,6 +311,10 @@ unlinking fields (equivalent of performing Ctrl-Shift-F9 on the whole document)
 
 =item *
 
+adding markers at bookmark start and end positions
+
+=item *
+
 regex replacements within text, for example for :
 
 =over
@@ -338,16 +342,20 @@ pretty-printing the internal XML structure.
 
 
 
-
-=head2 Operating mode
+=head2 The C<.docx> format
 
 The format of Microsoft C<.docx> documents is described in
 L<http://www.ecma-international.org/publications/standards/Ecma-376.htm>
 and  L<http://officeopenxml.com/>. An excellent introduction can be
 found at L<https://www.toptal.com/xml/an-informal-introduction-to-docx>.
+Another precious source of documentation is L<http://officeopenxml.com/WPcontentOverview.php>.
 Internally, a document is a zipped
 archive, where the member named C<word/document.xml> stores the main
 document contents, in XML format.
+
+
+
+=head2 Operating mode
 
 The present module does not parse all details of the whole XML
 structure because it only focuses on I<text> nodes (those that contain
@@ -356,6 +364,7 @@ properties). All remaining XML information, for example for
 representing sections, paragraphs, tables, etc., is stored as opaque
 XML fragments; these fragments are re-inserted at proper places when
 reassembling the whole document after having modified some text nodes.
+
 
 
 =head1 METHODS
@@ -382,8 +391,7 @@ Instance of L<Archive::Zip> associated with this file
 =head3 parts
 
 Hashref to L<MsOffice::Word::Surgeon::PackagePart> objects, keyed by their part name in the ZIP file.
-There is always a C<'document'> part. Currently, other optional parts may be headers and footers.
-Future versions may include other parts like footnotes or endnotes.
+There is always a C<'document'> part. Other parts may be headers, footers, footnotes or endnotes.
 
 =head3 document
 

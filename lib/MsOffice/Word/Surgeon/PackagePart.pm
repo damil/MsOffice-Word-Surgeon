@@ -15,7 +15,7 @@ use match::simple                  qw(match);
 sub has_inner ($@) {my $attr = shift; has($attr => @_, lazy => 1, builder => "_$attr", init_arg => undef)}
 
 
-our $VERSION = '2.05';
+our $VERSION = '2.06';
 
 # constant integers to specify indentation modes -- see L<XML::LibXML>
 use constant XML_NO_INDENT     => 0;
@@ -473,7 +473,7 @@ sub suppress_bookmarks {
 }
 
 
-sub reveal_bookmarks {
+ sub reveal_bookmarks {
   my ($self, @marking_args) = @_;
 
   # auxiliary objects
@@ -543,9 +543,10 @@ sub _split_into_field_nodes {
     $node{$_} //= "" for qw/xml_before field_kind attrs node_content/;
 
     # node attributes
-    my %attrs = parse_attrs($node{attrs}); #  =~ /([:\w]+)="([^"]*)"/g;
+    my %attrs = parse_attrs($node{attrs});
 
     if ($node{field_kind} eq 'Simple') {
+      # for a simple field, all information is within the XML node
       push @field_stack, {xml_before => $node{xml_before},
                           code       => $attrs{instr},
                           result     => $node{node_content},
@@ -553,6 +554,7 @@ sub _split_into_field_nodes {
     }
 
     elsif ($node{field_kind} eq 'Char') {
+      # for a complex field, we need an auxiliary subroutine to handle the begin/separate/end parts
       $self->_handle_fldChar_node(\@field_stack, \%node, \%attrs);
     }
         
@@ -577,7 +579,7 @@ sub _handle_fldChar_node {
 
   my $fldChar_type = $attrs->{"w:fldCharType"};
 
-  # beginning a of a field : push a new field node on top of the stack
+  # a) beginning a of a field : push a new field node on top of the stack
   if ($fldChar_type eq 'begin') {
     push @$field_stack,  {xml_before => $node->{xml_before},
                           code       => '',
@@ -585,7 +587,7 @@ sub _handle_fldChar_node {
                           status     => "begin"};
   }
     
-  # frontier between the "code" part and the "result" part : assemble code instructions seen so far
+  # b) frontier between the "code" part and the "result" part : assemble code instructions seen so far
   elsif ($fldChar_type eq 'separate') {
     my $current_field = $field_stack->[-1];
     $current_field && $current_field->{status} eq "begin"
@@ -595,7 +597,7 @@ sub _handle_fldChar_node {
     $current_field->{code} .= join "", @instr_text;
   }
 
-  # end of the field : assemble the "result" part.
+  # c) end of the field : assemble the "result" part.
   # If this field is embedded within the "code" or "result" part of a parent field, pop from stack
   # and insert current content into the parent.
   elsif ($fldChar_type eq 'end') {
@@ -608,16 +610,18 @@ sub _handle_fldChar_node {
     # lookup previous field on stack; its status tells us if the current field is embedded or not
     if (my $prev_field = $field_stack->[-2]) {
       if ($prev_field->{status} eq 'begin') {
+        # the current field is embedded within the "code" part of a parent field
         $prev_field->{code} .= sprintf $self->surgeon->show_embedded_field, $current_field->{code};
         pop @$field_stack;
       }
 
       elsif ($prev_field->{status} eq 'separate') {
+        # the current field is embedded within the "result" part of a parent field
         $prev_field->{result} .= $current_field->{xml_before} . $current_field->{result};
         pop @$field_stack;
       }
 
-      # elsif ($prev_field->{status} eq 'end') : nothing to do
+      # elsif ($prev_field->{status} eq 'end') : this is an independend field, just leave it on top of stack
 
     }
   }
@@ -653,32 +657,6 @@ sub unlink_fields {
   my $unlinker = sub {my ($code, $result) = @_; $result};
   $self->replace_fields($unlinker);
 }
-
-
-
-# sub unlink_fields_OLD {
-#   my $self = shift;
-
-#   # must find out what are the ASK fields before erasing the markup
-#   state $ask_field_rx = qr[<w:instrText[^>]+?>\s+ASK\s+(\w+)];
-#   my $contents            = $self->contents;
-#   my @names_of_ASK_fields = $contents =~ /$ask_field_rx/g;
-
-
-#   # regexes to remove field nodes and "field instruction" nodes
-#   state $field_instruction_txt_rx = qr[<w:instrText.*?</w:instrText>];
-#   state $field_boundary_rx        = qr[<w:fldChar
-#                                          (?:  [^>]*?/>                 # ignore all attributes until end of node ..
-#                                             |                          # .. or
-#                                               [^>]*?>.*?</w:fldChar>)  # .. ignore node content until closing tag
-#                                       ]x;   # field boundaries are encoded as  "begin" / "separate" / "end"
-#   state $simple_field_rx          = qr[</?w:fldSimple[^>]*>];
-
-#   # apply the regexes
-#   $self->reduce_noise($field_instruction_txt_rx, $field_boundary_rx, $simple_field_rx);
-
-#   return \@names_of_ASK_fields;
-# }
 
 
 
@@ -731,9 +709,6 @@ sub add_image {
   # return the relationship id
   return $rId;
 }
-
-
-
 
 
 
@@ -853,7 +828,7 @@ same internal representation and therefore the same operations can be invoked.
 
 =head2 new
 
-  my $run = MsOffice::Word::Surgeon::PackagePart->new(
+  my $part = MsOffice::Word::Surgeon::PackagePart->new(
     surgeon   => $surgeon,
     part_name => $name,
   );
@@ -879,7 +854,7 @@ ZIP member name of this part
 
 =head3 Other attributes
 
-Other attributes, which are not passed through the constructor but are generated lazily on demand, are :
+Other attributes, not passed through the constructor but generated lazily on demand, are :
 
 =over
 
