@@ -6,16 +6,15 @@ use MsOffice::Word::Surgeon::Carp;
 use MsOffice::Word::Surgeon::Utils qw(maybe_preserve_spaces is_at_run_level parse_attrs decode_entities encode_entities);
 use MsOffice::Word::Surgeon::Run;
 use MsOffice::Word::Surgeon::Text;
-use XML::LibXML;
+use MsOffice::Word::Surgeon::Field;
+use MsOffice::Word::Surgeon::BookmarkBoundary;
+use XML::LibXML                    ();;
 use List::Util                     qw(max);
-use Scalar::Util                   qw(dualvar);
 use match::simple                  qw(match);
 
 # syntactic sugar for attributes
 sub has_inner ($@) {my $attr = shift; has($attr => @_, lazy => 1, builder => "_$attr", init_arg => undef)}
 
-
-our $VERSION = '2.06';
 
 # constant integers to specify indentation modes -- see L<XML::LibXML>
 use constant XML_NO_INDENT     => 0;
@@ -23,17 +22,15 @@ use constant XML_SIMPLE_INDENT => 1;
 
 use namespace::clean -except => 'meta';
 
-
+our $VERSION = '2.06';
 
 #======================================================================
 # ATTRIBUTES
 #======================================================================
 
-
 # attributes passed to the constructor
 has       'surgeon'        => (is => 'ro', isa => 'MsOffice::Word::Surgeon', required => 1, weak_ref => 1);
 has       'part_name'      => (is => 'ro', isa => 'Str',                     required => 1);
-
 
 # attributes constructed by the module -- not received through the constructor
 has_inner 'contents'       => (is => 'rw', isa => 'Str',      trigger => \&_on_new_contents);
@@ -58,7 +55,6 @@ my %noise_reduction_regexes = (
   empty_run_props        => qr(<w:rPr></w:rPr>),
   soft_hyphens           => qr(<w:softHyphen/>),
  );
-
 my @noise_reduction_list = qw/proof_checking revision_ids
                               complex_script_bold page_breaks language
                               empty_run_props soft_hyphens/;
@@ -84,10 +80,9 @@ sub _runs {
     </w:t>                            # closing tag for text
   ]x;
 
-
   # split XML content into run fragments
   my $contents      = $self->contents;
-  my @run_fragments = split m[$run_regex], $contents, -1;
+  my @run_fragments = split m[$run_regex], $contents, -1; # -1 : don't strip trailing items
   my @runs;
 
   # build internal RUN objects
@@ -96,7 +91,7 @@ sub _runs {
     $run_contents //= '';
 
     # split XML of this run into text fragmentsn
-    my @txt_fragments = split m[$txt_regex], $run_contents, -1;
+    my @txt_fragments = split m[$txt_regex], $run_contents, -1; # -1 : don't strip trailing items
     my @texts;
 
     # build internal TEXT objects
@@ -241,8 +236,6 @@ sub plain_text {
 }
 
 
-
-
 #======================================================================
 # MODIFYING CONTENTS
 #======================================================================
@@ -296,7 +289,6 @@ sub reduce_all_noises {
 }
 
 
-
 sub merge_runs {
   my ($self, %args) = @_;
 
@@ -328,8 +320,6 @@ sub merge_runs {
   # reassemble the whole stuff and inject it as new contents
   $self->contents(join "", map {$_->as_xml} @new_runs);
 }
-
-
 
 sub replace {
   my ($self, $pattern, $replacement_callback, %replacement_args) = @_;
@@ -369,7 +359,6 @@ sub replace {
   return $xml;
 }
 
-
 sub _update_contents_in_zip { # called for each part before saving the zip file
   my $self = shift;
 
@@ -383,35 +372,33 @@ sub _update_contents_in_zip { # called for each part before saving the zip file
 # OPERATIONS ON BOOKMARKS
 #======================================================================
 
-
-sub _split_into_bookmark_nodes {
-  my ($self, $xml) = @_;
+sub bookmark_boundaries {
+  my ($self) = @_;
 
   # regex to find bookmark tags
   state $bookmark_rx = qr{
-     (                               # the whole tag                       -- capture 1
-      <w:bookmark(Start|End)         # kind of tag name                    -- capture 2
-        .+?                          # optional attributes (may be w:colFirst, w:colLast) -- no capture
-        w:id="(\d+)"                 # 'id' attribute, bookmark identifier -- capture 3
-        (?: \h+ w:name="([^"]+)")?   # optional 'name' attribute           -- capture 4
-        \h* />                       # end of this tag
+     (                               # $1: the whole tag
+      <w:bookmark(Start|End)         # $2: kind of bookmark boundary
+        \h* ([^>]*?)                 # $3: node attributes
+      />                             # end of tag
      )                               # end of capture 1
     }sx;
 
-  # split the whole xml according to the regex. Captured groups are also added to the stack
-  my @xml_chunks = split /$bookmark_rx/, $xml;
+  # split the whole xml according to the regex. Captured groups are also added to the list
+  my @xml_chunks = split /$bookmark_rx/, $self->contents;
+  my $final_xml  = pop @xml_chunks;
 
-  # walk through the list of fragments and build a stack of hashrefs as bookmark nodes
-  my @bookmark_nodes;
-  while (my @chunk = splice @xml_chunks, 0, 5) {
-    my %node;  @node{qw/xml_before node_xml node_kind id name/} = @chunk; # initialize a node hash
-    $node{$_} //= "" for qw/xml_before node_kind node_xml/;               # empty strings instead of undef
-    push @bookmark_nodes, \%node;
+  # walk through the list of fragments and build BookmarkBoundary objects
+  my @bookmark_boundaries;
+  while (my @chunk = splice @xml_chunks, 0, 4) {
+    my %bkmk_args;  @bkmk_args{qw/xml_before node_xml kind attrs/} = @chunk;
+    my %attrs        = parse_attrs(delete $bkmk_args{attrs} // "");
+    $bkmk_args{id}   = $attrs{'w:id'};
+    $bkmk_args{name} = $attrs{'w:name'} if $attrs{'w:name'};
+    push @bookmark_boundaries, MsOffice::Word::Surgeon::BookmarkBoundary->new(%bkmk_args);
   }
-  # note : in most cases the last "node" is not really a node : it has no 'node_kind', but only 'xml_before'
-  
-  # return the stack
-  return @bookmark_nodes;
+
+  return wantarray ? (\@bookmark_boundaries, $final_xml) : \@bookmark_boundaries;
 }
 
 
@@ -424,42 +411,48 @@ sub suppress_bookmarks {
   croak "suppress_bookmarks: invalid options: " . join(", ", @invalid_opt) if @invalid_opt;
   %options = (markup_only => qr/./) if ! keys %options;
 
+  # parse bookmark boundaries
+  my ($bookmark_boundaries, $final_xml) = $self->bookmark_boundaries;
   
-  # loop on bookmark nodes
-  my @bookmark_nodes = $self->_split_into_bookmark_nodes($self->contents);
-  my %node_ix_by_id;
-  while (my ($ix, $node) = each @bookmark_nodes) {
-    if ($node->{node_kind} eq 'Start') {
-      $node_ix_by_id{$node->{id}} = $ix;
+  # loop on bookmark boundaries
+  my %boundary_ix_by_id;
+  while (my ($ix, $boundary) = each @$bookmark_boundaries) {
+
+    # for starting boundaries, just remember the starting index
+    if ($boundary->kind eq 'Start') {
+      $boundary_ix_by_id{$boundary->id} = $ix;
     }
-    elsif ($node->{node_kind} eq 'End') {
+
+    # for ending boundaries, do the suppression
+    elsif ($boundary->kind eq 'End') {
 
       # try to find the corresponding bookmarkStart node. 
-      my $start_ix = $node_ix_by_id{$node->{id}};
+      my $start_ix = $boundary_ix_by_id{$boundary->id};
 
+      # if not found, this is because the start was within a field that has been erased. So just clear the bookmarkEnd
       if (!defined $start_ix) {
-        # no start node -- this is because it was within a field that has been erased. So just clear the end node.
-        $node->{node_xml} = "";
+        $boundary->node_xml("");
       }
 
+      # if found, do the normal suppression
       else {
-        my $start_node         = $bookmark_nodes[$start_ix];
-        my $bookmark_name      = $start_node->{name};
-        my $should_erase_range = match($bookmark_name, $options{full_range});
-        if ($should_erase_range || match($bookmark_name, $options{markup_only})) {
+        my $bookmark_start      = $bookmark_boundaries->[$start_ix];
+        my $bookmark_name       = $bookmark_start->name;
+        my $should_erase_markup = match($bookmark_name, $options{markup_only});
+        my $should_erase_range  = match($bookmark_name, $options{full_range});
+        if ($should_erase_markup || $should_erase_range) {
 
-          # erase markup (start and end nodes)
-          $node->{node_xml}       = "";
-          $start_node->{node_xml} = "";
+          # erase markup (start and end bookmarks)
+          $_->node_xml("") for $boundary, $bookmark_start;
 
-          # if required, erase inner range
+          # if required, also erase inner range
           if ($should_erase_range) {
             for my $erase_ix ($start_ix+1 .. $ix) {
-              my $inner_node = $bookmark_nodes[$erase_ix];
-              !$inner_node->{node_xml}
+              my $inner_boundary = $bookmark_boundaries->[$erase_ix];
+              !$inner_boundary->node_xml
                 or die "cannot erase contents of bookmark '$bookmark_name' "
-                . "because it contains the start of bookmark '$inner_node->{name}'";
-              $inner_node->{xml_before} = "";
+                . "because it contains the start of bookmark '". $inner_boundary->name . "'";
+              $inner_boundary->xml_before("");
             }
           }
         }
@@ -468,7 +461,7 @@ sub suppress_bookmarks {
   }
 
   # re-build the whole XML from all remaining fragments, and inject it back
-  my $new_contents = join "", map {@{$_}{qw/xml_before node_xml/}} @bookmark_nodes;
+  my $new_contents = join "", (map {$_->xml_before, $_->node_xml} @$bookmark_boundaries), $final_xml;
   $self->contents($new_contents);
 }
 
@@ -480,28 +473,29 @@ sub suppress_bookmarks {
   my $marker            = MsOffice::Word::Surgeon::PackagePart::_BookmarkMarker->new(@marking_args);
   my $paragraph_tracker = MsOffice::Word::Surgeon::PackagePart::_ParaTracker->new;
 
-  # loop over bookmark nodes
-  my @bookmark_name_by_id;
+  # parse bookmark boundaries
+  my ($bookmark_boundaries, $final_xml) = $self->bookmark_boundaries;
 
-  my @bookmark_nodes    = $self->_split_into_bookmark_nodes($self->contents);
-  foreach my $node (@bookmark_nodes) {
+  # loop on bookmark boundaries
+  my @bookmark_name_by_id;
+  foreach my $boundary (@$bookmark_boundaries) {
 
     # count opening and closing paragraphs in xml before this node
-    $paragraph_tracker->count_paragraphs($node->{xml_before});
+    $paragraph_tracker->count_paragraphs($boundary->xml_before);
 
     # add visible runs before or after bookmark nodes
-    if ($node->{node_kind} eq 'Start') {
-      $bookmark_name_by_id[$node->{id}] = $node->{name};
-      substr $node->{node_xml}, 0, 0, $paragraph_tracker->maybe_add_paragraph($marker->mark($node->{name}, 0));
+    if ($boundary->kind eq 'Start') {
+      $bookmark_name_by_id[$boundary->id] = $boundary->name;
+      $boundary->prepend_xml($paragraph_tracker->maybe_add_paragraph($marker->mark($boundary->name, 0)));
     }
-    elsif ($node->{node_kind} eq 'End') {
-      my $bookmark_name  = $bookmark_name_by_id[$node->{id}];
-      $node->{node_xml} .= $paragraph_tracker->maybe_add_paragraph($marker->mark($bookmark_name, 1));
+    elsif ($boundary->kind eq 'End') {
+      my $bookmark_name  = $bookmark_name_by_id[$boundary->id];
+      $boundary->append_xml($paragraph_tracker->maybe_add_paragraph($marker->mark($bookmark_name, 1)));
     }
   }
 
   # re-build the whole XML and inject it back
-  my $new_contents = join "", map {@{$_}{qw/xml_before node_xml/}} @bookmark_nodes;
+  my $new_contents = join "", (map {$_->xml_before, $_->node_xml} @$bookmark_boundaries), $final_xml;
   $self->contents($new_contents);
 }
 
@@ -510,10 +504,8 @@ sub suppress_bookmarks {
 # OPERATIONS ON FIELDS
 #======================================================================
 
-
-
-sub _split_into_field_nodes {
-  my ($self, $xml) = @_;
+sub fields {
+  my ($self) = @_;
 
   # regex to find field nodes
   state $field_rx = qr{
@@ -529,10 +521,11 @@ sub _split_into_field_nodes {
       )
     }sx;
 
-  # split the whole xml according to the regex. Captured groups are also added to the stack
-  my @xml_chunks = split /$field_rx/, $xml;
+  # split the whole xml according to the regex. Captured groups are also added to the list
+  my @xml_chunks = split /$field_rx/, $self->contents;
+  my $final_xml  = pop @xml_chunks;
 
-  # walk through the list of fragments and build a stack of hashrefs as field nodes
+  # walk through the list of fragments and build a stack of field objects
   my @field_stack;
 
  NODE:
@@ -547,96 +540,32 @@ sub _split_into_field_nodes {
 
     if ($node{field_kind} eq 'Simple') {
       # for a simple field, all information is within the XML node
-      push @field_stack, {xml_before => $node{xml_before},
-                          code       => $attrs{instr},
-                          result     => $node{node_content},
-                          status     => "end"};
+      push @field_stack, MsOffice::Word::Surgeon::Field->new(
+        xml_before => $node{xml_before},
+        code       => $attrs{'w:instr'},
+        result     => $node{node_content},
+       );
     }
-
+    
     elsif ($node{field_kind} eq 'Char') {
       # for a complex field, we need an auxiliary subroutine to handle the begin/separate/end parts
-      $self->_handle_fldChar_node(\@field_stack, \%node, \%attrs);
+      _handle_fldChar_node(\@field_stack, \%node, \%attrs);
     }
-        
-    else {
-      # this is the last node, it only contains 'xml_before'
-      push @field_stack, {xml_before => $node{xml_before},
-                          code       => '',
-                          result     => '',
-                          status     => "end"};
-    }
-
-  }
-  
-  # return the stack
-  return @field_stack;
-}
-
-
-
-sub _handle_fldChar_node {
-  my ($self, $field_stack, $node, $attrs) = @_;
-
-  my $fldChar_type = $attrs->{"w:fldCharType"};
-
-  # a) beginning a of a field : push a new field node on top of the stack
-  if ($fldChar_type eq 'begin') {
-    push @$field_stack,  {xml_before => $node->{xml_before},
-                          code       => '',
-                          result     => '',
-                          status     => "begin"};
-  }
     
-  # b) frontier between the "code" part and the "result" part : assemble code instructions seen so far
-  elsif ($fldChar_type eq 'separate') {
-    my $current_field = $field_stack->[-1];
-    $current_field && $current_field->{status} eq "begin"
-      or croak q{met <w:fldChar w:fldCharType="separate"> without an open w:fldCharType="begin"};
-    $current_field->{status} = "separate";
-    my @instr_text = $node->{xml_before} =~ m{<w:instrText.*?>(.*?)</w:instrText>}g;
-    $current_field->{code} .= join "", @instr_text;
-  }
-
-  # c) end of the field : assemble the "result" part.
-  # If this field is embedded within the "code" or "result" part of a parent field, pop from stack
-  # and insert current content into the parent.
-  elsif ($fldChar_type eq 'end') {
-    my $current_field = $field_stack->[-1];
-    $current_field && $current_field->{status} ne "end"
-      or croak q{met <w:fldChar w:fldCharType="end"> without an open w:fldCharType="begin"};
-    $current_field->{status}  = "end";
-    $current_field->{result} .= $node->{xml_before};
-
-    # lookup previous field on stack; its status tells us if the current field is embedded or not
-    if (my $prev_field = $field_stack->[-2]) {
-      if ($prev_field->{status} eq 'begin') {
-        # the current field is embedded within the "code" part of a parent field
-        $prev_field->{code} .= sprintf $self->surgeon->show_embedded_field, $current_field->{code};
-        pop @$field_stack;
-      }
-
-      elsif ($prev_field->{status} eq 'separate') {
-        # the current field is embedded within the "result" part of a parent field
-        $prev_field->{result} .= $current_field->{xml_before} . $current_field->{result};
-        pop @$field_stack;
-      }
-
-      # elsif ($prev_field->{status} eq 'end') : this is an independend field, just leave it on top of stack
-
-    }
-  }
+    $self->_maybe_embed_last_field(\@field_stack);
+ }
+  
+  return wantarray ? (\@field_stack, $final_xml) : \@field_stack;
 }
 
 
 sub replace_fields {
   my ($self, $field_replacer) = @_;
 
-  my @fields = $self->_split_into_field_nodes($self->contents);
+  my ($fields, $final_xml) = $self->fields;
+  my @xml_parts            = map {$_->xml_before, $field_replacer->($_)} @$fields;
 
-  my @xml_parts = map {($_->{xml_before}, 
-                        $_->{code} ? $field_replacer->($_->{code}, $_->{result}) : "")} @fields;
-
-  $self->contents(join "", @xml_parts);
+  $self->contents(join "", @xml_parts, $final_xml);
 }
 
 
@@ -644,20 +573,97 @@ sub reveal_fields {
   my $self = shift;
 
   # replace all fields by a textual representatio of their "code" part
-  my $revealer = sub {my ($code, $result) = @_; encode_entities($code); "<w:t>{$code}</w:t>"};
+  my $revealer = sub {my $code = shift->code; encode_entities($code); return "<w:t>{$code}</w:t>"};
   $self->replace_fields($revealer);
 }
-
 
 
 sub unlink_fields {
   my $self = shift;
 
   # replace all fields by just their "result" part (in other words, ignore the "code" part)
-  my $unlinker = sub {my ($code, $result) = @_; $result};
+  my $unlinker = sub {my $result = shift->result; return $result};
   $self->replace_fields($unlinker);
 }
 
+
+# below: auxiliary methods or subroutines for field handling
+
+sub _decode_instr_text {
+  my ($xml) = @_;
+
+  my @instr_text = $xml =~ m{<w:instrText.*?>(.*?)</w:instrText>}g;
+  my $instr      = join "", @instr_text;
+  decode_entities($instr);
+  return $instr;
+}
+
+sub _handle_fldChar_node {
+  my ($field_stack, $node, $attrs) = @_;
+
+  my $fldChar_type = $attrs->{"w:fldCharType"};
+
+  # if this is the beginning a of a field : push a new field object on top of the stack
+  if ($fldChar_type eq 'begin') {
+    push @$field_stack, MsOffice::Word::Surgeon::Field->new(
+      xml_before => $node->{xml_before},
+      code       => '',
+      result     => '',
+      status     => "begin",
+    );
+  }
+
+  # otherwise this is the continuation of the current field (eiter "separate" or "end") : update it
+  else { 
+    my $current_field  = $field_stack->[-1]
+      or croak qq{met <w:fldChar w:fldCharType="$fldChar_type"> but there is no current field};
+    my $current_status = $current_field->status;
+
+    if ($current_status eq "begin") {
+      $current_field->append_to_code(_decode_instr_text($node->{xml_before}));
+    }
+
+    elsif ($current_status eq "separate") {
+      $fldChar_type eq "end"
+        or croak qq{after a "separate" node, w:fldCharType cannot be "$fldChar_type"};
+      $current_field->append_to_result($node->{xml_before});
+    }
+
+    elsif ($current_status eq "end") {
+      croak qq{met <w:fldChar w:fldCharType="$fldChar_type"> but last field is not open};
+    }
+
+
+    $current_field->status($fldChar_type);
+  }
+}
+
+sub _maybe_embed_last_field {
+  my ($self, $field_stack) = @_;
+
+  my $last_field  = $field_stack->[-1];
+  my $prev_field  = $field_stack->[-2];
+
+  if ($last_field && $prev_field && $last_field->status eq 'end') {
+
+    my $prev_status = $prev_field->status;
+
+    if ($prev_status eq 'begin') {
+      # the last field is embedded within the "code" part of the previous field
+      $prev_field->append_to_code(_decode_instr_text($last_field->xml_before)
+                                  . sprintf $self->surgeon->show_embedded_field, $last_field->code);
+      pop @$field_stack;
+    }
+
+    elsif ($prev_status eq 'separate') {
+      # the last field is embedded within the "result" part of the previous field
+      $prev_field->append_to_result($last_field->xml_before . $last_field->result);
+      pop @$field_stack;
+    }
+
+    # elsif ($prev_status eq 'end') : $last_field is an independend field, just leave it on top of stack
+  }
+}
 
 
 #======================================================================
@@ -907,7 +913,7 @@ a hashref of images within this package part. Keys of the hash are image I<alter
 If present, the alternative I<title> will be prefered; otherwise the alternative I<description> will be taken
 (note : the I<title> field was displayed in Office 2013 and 2016, but more recent versions only display
 the I<description> field -- see
-L<https://support.microsoft.com/en-us/office/add-alternative-text-to-a-shape-picture-chart-smartart-graphic-or-other-object-44989b2a-903c-4d9a-b742-6a75b451c669|MsOffice documentation>).
+L<MsOffice documentation|https://support.microsoft.com/en-us/office/add-alternative-text-to-a-shape-picture-chart-smartart-graphic-or-other-object-44989b2a-903c-4d9a-b742-6a75b451c669>).
 
 Images without alternative text will not be accessible through the current Perl module.
 
@@ -1096,6 +1102,18 @@ is typically used as
 
 =head2 Operations on bookmarks
 
+
+=head3 bookmark_boundaries
+
+  my $boundaries               = part->bookmark_boundaries;
+  my ($boundaries, $final_xml) = part->bookmark_boundaries;
+
+Parses the XML content to discover bookmark boundaries.
+In scalar context, returns an arrayref of L<MsOffice::Word::Surgeon::BookmarkBoundary> objects.
+In list context, returns the arrayref followed by a plain string containing the final XML fragment.
+
+
+
 =head3 suppress_bookmarks
 
   $part->suppress_bookmarks(full_range => [qw/foo bar/], markup_only => qr/^_/);
@@ -1137,7 +1155,7 @@ never displayed by MsWord.
 
 Usually bookmarks boundaries in MsWord are not visible; the only way to have a visual clue is to turn on
 an option in
-L<https://support.microsoft.com/en-gb/office/troubleshoot-bookmarks-9cad566f-913d-49c6-8d37-c21e0e8d6db0|Advanced / Show document content / Show bookmarks> -- but this only displays where bookmarks start and end, without the names of the bookmarks.
+L<Advanced / Show document content / Show bookmarks|https://support.microsoft.com/en-gb/office/troubleshoot-bookmarks-9cad566f-913d-49c6-8d37-c21e0e8d6db0> -- but this only displays where bookmarks start and end, without the names of the bookmarks.
 
 The C<reveal_bookmarks()> method will insert a visible run before each bookmark start and after each bookmark end, showing
 the bookmark name. This is an interesting tool for documenting where bookmarks are located in an existing document.
@@ -1180,6 +1198,16 @@ automatically by MsWord, such as C<_GoBack> or C<_Toc53196147>.
 
 
 =head2 Operations on fields
+
+=head3 fields
+
+  my $fields               = part->fields;
+  my ($fields, $final_xml) = part->fields;
+
+Parses the XML content to discover MsWord fields.
+In scalar context, returns an arrayref of L<MsOffice::Word::Surgeon::Field> objects.
+In list context, returns the arrayref followed by a plain string containing the final XML fragment.
+
 
 
 =head3 replace_fields
