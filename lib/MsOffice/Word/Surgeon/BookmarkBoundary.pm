@@ -47,22 +47,43 @@ bookmark fragments.
 
 =head2 new
 
-  my $field = MsOffice::Word::Surgeon::Bookmark(
-  );
+  my $field = MsOffice::Word::Surgeon::Bookmark(%args);
 
 Constructor for a new bookmark object. Arguments are :
 
 =over
 
+=item kind
+
+Either C<Start> or C<End>
+
+=item id
+
+Numerical identifier for the bookmark
+
+=item name
+
+The bookmark name. Only present in C<Start> boundaries.
+
 =item xml_before
 
 A string containing arbitrary XML preceding that bookmark in the complete document.
-The string may be empty but must be present.
 
+=item node_xml
+
+The complete XML for this node.
 
 =back
 
+=head1 METHODS
 
+=head2 prepend_xml
+
+Adds an XML fragment in front of the current node_xml.
+
+=head2 append_xml
+
+Adds an XML fragment after the current node_xml.
 
 =head1 AUTHOR
 
