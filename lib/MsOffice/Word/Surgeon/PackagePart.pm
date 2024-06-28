@@ -22,7 +22,7 @@ use constant XML_SIMPLE_INDENT => 1;
 
 use namespace::clean -except => 'meta';
 
-our $VERSION = '2.06';
+our $VERSION = '2.07';
 
 #======================================================================
 # ATTRIBUTES
