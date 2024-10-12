@@ -321,7 +321,7 @@ regex replacements within text, for example for :
 
 =item *
 
-anonymization, i.e. replacement of names or adresses by aliases;
+anonymization, i.e. replacement of names or addresses by aliases;
 
 =item *
 
