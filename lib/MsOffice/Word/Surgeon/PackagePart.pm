@@ -22,7 +22,7 @@ use constant XML_SIMPLE_INDENT => 1;
 
 use namespace::clean -except => 'meta';
 
-our $VERSION = '2.08';
+our $VERSION = '2.09';
 
 #======================================================================
 # ATTRIBUTES
@@ -231,6 +231,9 @@ sub plain_text {
 
   # remove all remaining XML tags
   $txt =~ s/<[^>]+>//g;
+
+  # decode entities
+  decode_entities($txt);
 
   return $txt;
 }
